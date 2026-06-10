@@ -1,0 +1,32 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+*.pyd
+*.so
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# エディタ・OS
+.vscode/
+.idea/
+Thumbs.db
+
+# Rust build artifacts
+target/
+
+# 実行時の生成物（必要に応じて）
+data/calib_imgs/*
+!data/calib_imgs/.gitkeep
+data/captures/*
+!data/captures/.gitkeep
+data/test/*
+!data/test/.gitkeep
+outputs/*
+!outputs/.gitkeep
+params/*
+!params/.gitkeep
