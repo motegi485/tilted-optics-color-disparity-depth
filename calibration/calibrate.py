@@ -1,0 +1,196 @@
+"""
+calibration/calibrate.py
+
+校正画像（ファイル名 = 距離[mm].jpg）から符号付き視差を求め、符号別に per-pixel RANSAC で
+直線 row = a·disparity + b をフィットし、各距離の zero_disp(=切片 b)・傾き a・
+インライヤ率・点数を params/params.csv に出力する。
+（先行研究の参考コードの calibration.py の per-pixel RANSAC 版を rt 構成で再現したもの）
+
+パイプライン: 校正画像 → 視差(core/disparity) → 符号別の点群抽出 → RANSAC 直線フィット → params.csv
+後段の fit_params.py が params.csv を受け取り、参照式 y0 = v/z + u をフィットする。
+
+設計原則(v1.2 §4.1):
+  - calibration/ は core ではない。config import・I/O・matplotlib 可。
+    ただし視差計算は純関数 core.disparity を config 注入で呼ぶ(校正と推論の設定を一致させる)。
+  - 無効値は np.nan(0 埋め禁止)。入力検証は raise(assert は -O で無効化されるため使わない)。
+"""
+
+# --- サブパッケージから root の config / core を import するためのブートストラップ ---
+# 推奨実行は `uv run python -m calibration.calibrate`(root を cwd に)。
+# 直接実行 `python calibration/calibrate.py` でも動くよう root を sys.path に通す。
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import cv2
+import numpy as np
+import pandas as pd
+
+import config
+from core.disparity import calcDisparityByZNCC
+from sklearn.linear_model import RANSACRegressor
+
+
+# ===== 表示専用(数値再現には影響しない) =====
+SHOW_PLOT = True                       # True で距離ごとに散布図＋RANSAC直線を表示(インライヤマスクの目視検証)
+# PLOT_MAX_POINTS = 3000               # (旧)散布図の表示点数上限。現在は全点描画
+
+IMG_EXTS = {".jpg", ".jpeg", ".png"}   # 校正画像として扱う拡張子
+
+
+def extract_sign_points(disp_map, sign, low, height):
+    """指定符号の生視差画素を (disparity, row) の点群として返す(行平均はとらない)。
+
+    pos 枝は 0<low<d<height、neg 枝は -height<d<-low の画素のみ採用する
+    (POF 近傍の不感帯と探索端の誤マッチを除外)。
+    NaN は比較が必ず False になるため、ここで自動的に除外される。
+    """
+    if sign > 0:
+        mask = (disp_map > low) & (disp_map < height)
+    else:
+        mask = (disp_map < -low) & (disp_map > -height)
+    rows, _cols = np.where(mask)               # x 座標(列)は直線モデルに不要なので捨てる
+    return disp_map[mask], rows.astype(np.float64)
+
+
+def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
+    """row = a·disparity + b を RANSAC でフィット(特徴量=disparity, 目的変数=row)。
+
+    多数決ではなく幾何的コンセンサス(共線インライヤ最大化)で本物の直線を拾うため、
+    散らばったスプリアス誤マッチが多くても頑健。
+    戻り値: a(傾き), b(切片=zero_disp=視差0のy座標), inlier_mask。
+    コンセンサス不成立時は RANSACRegressor が ValueError を送出する。
+    """
+    X = d_vals.reshape(-1, 1)                  # sklearn は特徴量を (N,1) の2次元で要求する
+    est = RANSACRegressor(residual_threshold=residual_threshold,
+                          random_state=random_state)
+    est.fit(X, row_vals)
+    a = float(est.estimator_.coef_[0])         # 最終インライヤで再フィットした直線の傾き
+    b = float(est.estimator_.intercept_)       # 切片 = zero_disp(fit_params.py の核心入力)
+    return a, b, est.inlier_mask_
+
+
+def _plot_branch(ax, d_vals, row_vals, mask, a, b, height_px, color, label):
+    """1枝分の散布図と RANSAC 直線を描く(アウトライヤ=灰, インライヤ=色)。"""
+    ax.scatter(d_vals[~mask], row_vals[~mask], s=1, c="lightgray", alpha=0.3)
+    ax.scatter(d_vals[mask],  row_vals[mask],  s=1, c=color,       alpha=0.5)
+    if np.isfinite(a) and np.isfinite(b) and a != 0:   # RANSAC 失敗(NaN)・ゼロ割は描画しない
+        # row = a·disparity + b を disparity について解き、全行に渡って直線を引く
+        rr = np.arange(height_px)
+        ax.plot((rr - b) / a, rr, color=color, lw=2, label=label)
+
+
+def main():
+    # --- 入口チェック: 校正画像ディレクトリと画像の存在を先に確認する ---
+    calib_dir = config.CALIB_IMGS_DIR
+    if not calib_dir.is_dir():
+        raise FileNotFoundError(f"キャリブレーション画像ディレクトリがありません: {calib_dir}")
+
+    image_paths = sorted(p for p in calib_dir.iterdir()
+                         if p.suffix.lower() in IMG_EXTS)
+    if not image_paths:
+        raise FileNotFoundError(f"キャリブレーション画像が見つかりません: {calib_dir}")
+
+    low, height = config.DISP_PLOT_LOW, config.DISP_PLOT_HEIGHT
+    rows_out = []                              # 距離ごとの結果を貯め、ループ後に一括で CSV 化する
+
+    # --- 距離ループ: 画像1枚 = 1距離 = params.csv の1行 ---
+    for path in image_paths:
+        # ファイル名(拡張子除く)が距離値。整数化できないファイルは校正対象外として飛ばす
+        try:
+            depth_value = int(path.stem)
+        except ValueError:
+            print(f"スキップ: ファイル名が距離(整数)でない → {path.name}")
+            continue
+
+        image = cv2.imread(str(path))
+        if image is None:                      # 壊れた画像など読み込み失敗時は None が返る
+            print(f"スキップ: 画像読み込み失敗 → {path.name}")
+            continue
+        image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる(§6.1)
+
+        # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる(§2.1)
+        blue, _, red = cv2.split(image)
+        # 視差計算は純関数を config 注入で呼ぶ。これで校正・推論の設定一致がコード上で保証される
+        disp_map = calcDisparityByZNCC(
+            red, blue, config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
+
+        # 符号別に生視差画素を点群として取り出す。n は画素レベルのサンプル数(数万オーダー)
+        d_pos, y_pos = extract_sign_points(disp_map, +1, low, height)
+        d_neg, y_neg = extract_sign_points(disp_map, -1, low, height)
+        n_pos, n_neg = len(d_pos), len(d_neg)
+
+        # 直線フィットに足る点数が無い枝が一方でもあれば、その距離は校正不能として飛ばす
+        if n_pos < config.RANSAC_MIN_POINTS or n_neg < config.RANSAC_MIN_POINTS:
+            print(f"スキップ: 生視差点が不足 (pos={n_pos}, neg={n_neg}) → {path.name}")
+            continue
+
+        # pos/neg は視差範囲も点群分布も異なるため独立にフィットする。
+        # コンセンサス不成立時は NaN・全 False マスクで記録し、もう片枝は活かす
+        try:
+            a_pos, b_pos, mask_pos = ransac_fit_line(
+                d_pos, y_pos, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
+        except ValueError:
+            print("  pos: RANSAC コンセンサス不成立 → NaN")
+            a_pos, b_pos, mask_pos = np.nan, np.nan, np.zeros(n_pos, dtype=bool)
+        try:
+            a_neg, b_neg, mask_neg = ransac_fit_line(
+                d_neg, y_neg, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
+        except ValueError:
+            print("  neg: RANSAC コンセンサス不成立 → NaN")
+            a_neg, b_neg, mask_neg = np.nan, np.nan, np.zeros(n_neg, dtype=bool)
+
+        # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値(§6.3)
+        inlier_pos = float(mask_pos.mean()) if n_pos else 0.0
+        inlier_neg = float(mask_neg.mean()) if n_neg else 0.0
+
+        print(f"====== {depth_value}mm ======\n"
+              f"[pos] a={a_pos:.4f} zero_disp={b_pos:.4f} inlier={inlier_pos*100:.1f}% "
+              f"({int(mask_pos.sum())}/{n_pos})\n"
+              f"[neg] a={a_neg:.4f} zero_disp={b_neg:.4f} inlier={inlier_neg*100:.1f}% "
+              f"({int(mask_neg.sum())}/{n_neg})\n")
+
+        # この時点ではまだ書き込まない。全距離終了後に一括出力する(途中失敗で半端なファイルを残さない)
+        rows_out.append({
+            "depth": depth_value, "zero_disp_pos": b_pos, "zero_disp_neg": b_neg,
+            "a_pos": a_pos, "a_neg": a_neg,
+            "inlier_pos": inlier_pos, "inlier_neg": inlier_neg,
+            "n_pos": n_pos, "n_neg": n_neg,
+        })
+
+        # 散布図でインライヤ(色)/アウトライヤ(灰)と RANSAC 直線を確認(表示専用)
+        if SHOW_PLOT:
+            import matplotlib.pyplot as plt
+            h_px = image.shape[0]
+            fig, ax = plt.subplots()
+            _plot_branch(ax, d_pos, y_pos, mask_pos, a_pos, b_pos, h_px,
+                         "tab:blue", f"pos ({inlier_pos*100:.0f}%)")
+            _plot_branch(ax, d_neg, y_neg, mask_neg, a_neg, b_neg, h_px,
+                         "tab:orange", f"neg ({inlier_neg*100:.0f}%)")
+            ax.set_xlim(-height - 1, height + 1); ax.set_ylim(0, h_px)
+            ax.set_xlabel("disparity"); ax.set_ylabel("row (y)")
+            ax.set_title(f"depth = {depth_value} mm"); ax.legend()
+            plt.show(); plt.close(fig)
+
+    # --- 出力: 全距離がスキップされた場合は明示的に失敗させる ---
+    if not rows_out:
+        raise RuntimeError("有効なキャリブレーション距離が1つもありませんでした。")
+
+    config.PARAMS_DIR.mkdir(parents=True, exist_ok=True)
+    # 列順は先行研究の参考コードの params.csv に一致させる(near-match 照合のため)。
+    # スキップで追加順が乱れ得るので、距離昇順に並べ直してから出力する
+    df = pd.DataFrame(rows_out, columns=[
+        "depth", "zero_disp_pos", "zero_disp_neg", "a_pos", "a_neg",
+        "inlier_pos", "inlier_neg", "n_pos", "n_neg",
+    ]).sort_values("depth").reset_index(drop=True)
+    df.to_csv(config.PARAMS_CSV_PATH, index=False)         # fit_params.py への入力(全9列)
+    print(f"\n{config.PARAMS_CSV_PATH} に保存（{len(df)} 距離）")
+
+    # 診断サマリ(インライヤ率・点数のみ)。校正品質の記録用(§6.3)
+    df[["depth", "inlier_pos", "inlier_neg", "n_pos", "n_neg"]].to_csv(
+        config.DIAG_CSV_PATH, index=False)
+    print(f"{config.DIAG_CSV_PATH} に診断サマリを保存")
+
+
+if __name__ == "__main__":
+    main()
