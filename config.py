@@ -59,3 +59,6 @@ LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.
 
 # ===== 機材設定値 =====
 TILT_THETA_DEG = 30.0  # カメラの傾き角度 [deg]
+LENS_TILT_ANGLE = 30.0  # レンズの傾き角度 [deg]
+CAMERA_HEIGHT = 24.5 # カメラの高さ [cm]
+VIDEO_FRAME_RESOLUTION = (1280, 720) # ビデオフレームの解像度 (width, height)
