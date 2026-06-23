@@ -19,6 +19,10 @@ Thumbs.db
 # Rust build artifacts
 target/
 
+# Claude
+.claude/settings.local.json
+CLAUDE.local.md
+
 # 実行時の生成物（必要に応じて）
 data/calib_imgs/*
 !data/calib_imgs/.gitkeep

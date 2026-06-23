@@ -2,6 +2,7 @@
 core/ はこれを import しない（純関数・引数注入）。値の注入は呼び出し側の責務。
 """
 from pathlib import Path
+import cv2
 
 
 # ===== パス（__file__ 基準で cwd 非依存）=====
@@ -13,6 +14,12 @@ PARAMS_PATH = PARAMS_DIR / "fit_result.csv"
 CALIB_IMGS_DIR = DATA_DIR / "calib_imgs"                      # 校正画像（距離名.jpg）
 PARAMS_CSV_PATH = PARAMS_DIR / "params.csv"                   # calibrate.py の出力
 DIAG_CSV_PATH   = PARAMS_DIR / "calibration_diagnostics.csv" # 校正診断サマリ
+CAPTURES_DIR = DATA_DIR / "captures"     # raw 録画先（gitignore）
+OUTPUTS_DIR  = ROOT_DIR / "outputs"      # runner の結果保存（task 4 で使用）
+
+# 凍結ベースライン（静止画検証フィクスチャ。evaluate.py が読む側）
+BASELINE_DIR = PARAMS_DIR / "baseline"
+BASELINE_PARAMS_PATH = BASELINE_DIR / "fit_result.csv"
 
 # ===== 画像処理 =====
 # cv2.resize の (width, height) 順。(528,352)=R10 の 3:2 を歪みなくリサイズ
@@ -41,6 +48,14 @@ RANSAC_MIN_POINTS   = 10   # 有効な点の個数 n_pos/n_neg が、ぞれぞ�
 
 # ===== キャリブレーション: 参照式フィット (calibration/fit_params.py) =====
 MIN_VALID_PX = 10  # zero_disp(切片: y 座標の px 値) がこれ以下の距離行はフィット失敗として除外
+
+# ===== webcam capture =====
+CAPTURE_BACKEND      = cv2.CAP_MSMF      # 実測で DSHOW は暗フレーム → MSMF
+CAPTURE_DEVICE_INDEX = 0
+WEBCAM_NATIVE_SIZE   = (1280, 720)       # (W,H) 実測ネイティブ。preprocess/source で検証(raise)
+WEBCAM_CROP_W        = 1080              # 3:2 中央クロップ幅（高さは720全行）
+LIVE_WAIT_TIMEOUT_S = 8.0    # 実フィード待ちの上限（cold-start 実測 ~3.3s に余裕）
+LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.0 / live≈1.3
 
 # ===== 機材設定値 =====
 TILT_THETA_DEG = 30.0  # カメラの傾き角度 [deg]

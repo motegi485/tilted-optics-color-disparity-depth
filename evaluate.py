@@ -49,7 +49,7 @@ def evaluate(image_path: Path, params, gt_distance: int):
 
 
 def main():
-    params = load_params(config.PARAMS_PATH)
+    params = load_params(config.BASELINE_PARAMS_PATH)
     for img_path in sorted(config.TEST_DIR.glob("*.jpg")):
         gt = int(img_path.stem)            # ファイル名=正解距離[mm]
         mean_d, mode_d, mae, valid_size = evaluate(img_path, params, gt)
