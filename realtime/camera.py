@@ -245,7 +245,7 @@ class StillImageSource(FrameSource):
 
     想定入力は「保存した capture の1フレーム（raw 1280x720）」。共有 preprocess を通す
     前提のため raw サイズを検証する。任意サイズの一般テスト画像は対象外（それは
-    evaluate.py + params/baseline/ の役割・§4.3）。【要確認・option A】
+    evaluate.py + params/baseline/ の役割・§4.3）。
     """
 
     def __init__(self, path: str | Path):
