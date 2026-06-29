@@ -9,9 +9,14 @@ Path B: evaluate.py の core 手順を独立に再現（split → disparity → 
 gate2(0<z<50000) は両経路とも適用しない（runner 表示側の責務）。深度精度ではなく
 経路の同値性の確認なので、FR-8 webcam 校正前でも実施可。params は baseline 確定値を使う。
 
-実行: uv run python verify_pipeline_equivalence.py
+実行: uv run python -m checks.verify_pipeline_equivalence
 """
+# --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
+# 推奨実行は `uv run python -m checks.<name>`（root を cwd に）。
+# 直接実行 `python checks/<name>.py` でも動くよう root を sys.path に通す（calibration/ と同方式）。
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2
 import numpy as np

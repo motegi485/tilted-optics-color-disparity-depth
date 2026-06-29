@@ -2,9 +2,15 @@
 core/ の純関数を呼び、先行研究の参考コードの depth.py と同じ集計で比較する。
 ゲーティングは config 値でこの層が適用する（core は純関数のまま）。
 """
+# --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
+# 推奨実行は `uv run python -m checks.<name>`（root を cwd に）。
+# 直接実行 `python checks/<name>.py` でも動くよう root を sys.path に通す（calibration/ と同方式）。
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import cv2
 import numpy as np
-from pathlib import Path
 
 import config
 from core.disparity import calcDisparityByZNCC

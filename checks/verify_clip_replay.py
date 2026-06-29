@@ -12,13 +12,18 @@ preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化な
 
 params は録画時と同じものを使う必要がある(runner 既定＝baseline。--params で上書き可)。
 
-実行: uv run python verify_clip_replay.py --session 20260624_153000
+実行: uv run python -m checks.verify_clip_replay --session 20260624_153000
 """
 from __future__ import annotations
 
-import argparse
+# --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
+# 推奨実行は `uv run python -m checks.<name>`（root を cwd に）。
+# 直接実行 `python checks/<name>.py` でも動くよう root を sys.path に通す（calibration/ と同方式）。
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import argparse
 
 import cv2
 import numpy as np
