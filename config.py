@@ -33,7 +33,7 @@ EDGE_TH = 30            # 校正・推論で統一
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
 DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 15。search 半幅と一致
 DEPTH_MIN = 0
-DEPTH_MAX = 50000
+DEPTH_MAX = 5000
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====
