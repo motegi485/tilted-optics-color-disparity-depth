@@ -1,15 +1,21 @@
 """tools/probe_webcam.py
 Phase C 実機計測プローブ（診断用・使い捨て）。
 EOS R10 + EOS Webcam Utility Pro 経由の実フレーム解像度・実効 fps・色特性を実測する。
-core/ には依存しない。production コードではない。
+core/ には依存しない。production コードではない。診断用ツールのため実行は root から行うこと
+（`uv run python tools/probe_webcam.py`）。
 """
+# --- tools/ から root の config を import するためのブートストラップ ---
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import cv2
 import numpy as np
 import time
 import json
-from pathlib import Path
 from datetime import datetime
+
+import config
 
 # Windows の日本語コンソール（cp932）では非対応文字（≈ 等）の print が
 # UnicodeEncodeError で落ちる。それで計測自体が無に帰すのを防ぐため UTF-8 に固定。
@@ -19,11 +25,9 @@ try:
 except Exception:
     pass
 
-# 出力先（いずれも gitignore 済の想定）
-CAPTURE_DIR = Path("data/captures/probe")
-OUTPUT_DIR = Path("outputs")
-CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# 出力先（いずれも git 追跡外の想定）。mkdir は main() 内で行う（import 時の副作用を避ける）。
+CAPTURE_DIR = config.CAPTURES_DIR / "probe"
+OUTPUT_DIR = config.OUTPUTS_DIR
 
 DEVICE_INDEX = 0
 BACKENDS = [("CAP_DSHOW", cv2.CAP_DSHOW), ("CAP_MSMF", cv2.CAP_MSMF)]
@@ -152,6 +156,9 @@ def probe_backend(name: str, flag: int) -> dict:
 
 
 def main():
+    CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     report = {
         "timestamp": datetime.now().isoformat(),
         "opencv_version": cv2.__version__,

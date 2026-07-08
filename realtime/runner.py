@@ -35,6 +35,7 @@ realtime/ は core ではない（config import・I/O・cv2・threading を持�
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import threading
@@ -67,6 +68,8 @@ def to_colormap(depth: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     弁別するため専用色（黒）で塗る。車載では警告/制動などの判断は元 depth(npy)を読む前提で、
     これはあくまで人間が眺めるための投影（情報を落とした見た目であり判断根拠にはしない）。
     """
+    if vmax <= vmin:
+        raise ValueError(f"to_colormap: vmax({vmax}) は vmin({vmin}) より大きい必要があります")
     invalid = np.isnan(depth)                         # 無効画素の位置を先に確保（潰す前に）
     scaled = (np.nan_to_num(depth, nan=vmin) - vmin) / (vmax - vmin) * 255.0
     u8 = np.clip(scaled, 0, 255).astype(np.uint8)     # NaN を uint8 へ直接 astype すると不定値化するため必ず潰してから
@@ -90,6 +93,9 @@ class _FrameGrabber:
         self._frame: np.ndarray | None = None
         self._frame_id = -1                           # まだ1枚も無い
         self._error: BaseException | None = None
+        # still/video はほぼ瞬時に読めるため、スロットル無しだと計算スレッドとの帯域競合になりうる。
+        # webcam は実フレームレートで自然に律速されるため対象外（コンストラクタで1回だけ判定）。
+        self._throttle = not isinstance(source, WebcamSource)
         self._thread = threading.Thread(target=self._loop, name="frame-grabber", daemon=True)
 
     def start(self) -> None:
@@ -104,6 +110,8 @@ class _FrameGrabber:
                 with self._lock:
                     self._frame = raw                 # 参照差し替え。古い配列を計算側が握っていても不変なので copy 不要
                     self._frame_id += 1
+                if self._throttle:
+                    time.sleep(0.001)                 # still/video 用の軽い間引き
         except BaseException as e:                     # スレッド内例外は飲み込まず main へ運ぶ
             self._error = e
         finally:
@@ -120,21 +128,69 @@ class _FrameGrabber:
     def stop_and_join(self, timeout: float = 2.0) -> None:
         self._stop.set()
         self._thread.join(timeout)                    # daemon なので join が遅れても interpreter 終了は妨げない
+        if self._thread.is_alive():
+            # timeout 時点でまだ cap.read() 実行中の可能性がある。この状態で source.release() を
+            # 呼ぶと OpenCV ネイティブ層での競合になりうるため、追加で猶予を与える（2026-07 レビュー）。
+            logger.warning("frame-grabber が %.1fs 以内に終了しませんでした。追加で最大5.0s 待機します", timeout)
+            self._thread.join(5.0)
+            if self._thread.is_alive():
+                logger.warning("frame-grabber がまだ終了していません（cap.read() 実行中の可能性）。処理を続行します")
 
     def raise_if_error(self) -> None:
         if self._error is not None:
             raise self._error
 
+    def log_error_if_any(self) -> None:
+        """raise_if_error の非 raise 版。計算ループ側の例外を優先したい finally 節で使う。"""
+        if self._error is not None:
+            logger.error("frame-grabber 内で例外が発生していました（記録のみ）: %r", self._error)
+
 
 def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     # 録画を実行（セッション）ごとに分離する。captures/{session}, outputs/{session} に保存する
     # 実行を跨いだ連番（000000..）の上書き・混在を論理的に防ぐ（§9.2 のクリーン再現は
-    # 1セッション内のクリーンな連番が前提）。
+    # 1セッション内のクリーンな連番が前提）。既存かつ非空のディレクトリを黙って再利用すると
+    # 連番が 000000 から上書きされ新旧フレームが混在した「キメラセッション」になり、
+    # verify_clip_replay の自己整合チェックでは検出できない（2026-07 レビューで確認）ため、
+    # 録画開始前（フレーム取得前）に raise で止める。空ディレクトリは許可する。
     captures = Path(config.CAPTURES_DIR) / session
     outputs = Path(config.OUTPUTS_DIR) / session
+    for d in (captures, outputs):
+        if d.is_dir() and any(d.iterdir()):
+            raise RuntimeError(
+                f"セッション {session} は既存です。別名を指定するか、既存ディレクトリを退避してください"
+            )
     captures.mkdir(parents=True, exist_ok=True)
     outputs.mkdir(parents=True, exist_ok=True)
     return captures, outputs
+
+
+def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str | None,
+                        source: FrameSource) -> None:
+    """録画セッションの使用 params・config・起動条件を outputs/{session}/meta.json に記録する（B-6）。
+
+    「録画時と同じ params を使う」制約（§9.2）が人間の記憶頼みだと、A-2 の既定変更（live）以降は
+    過去セッション（baseline 録画）との不一致事故が起きやすい。verify_clip_replay.py がこれを
+    自動参照できるようにする。
+    """
+    meta = {
+        "params_path": params_path,
+        "params": {
+            "v_pos": params.v_pos, "u_pos": params.u_pos, "a_pos": params.a_pos, "w_pos": params.w_pos,
+            "v_neg": params.v_neg, "u_neg": params.u_neg, "a_neg": params.a_neg, "w_neg": params.w_neg,
+        },
+        "config": {
+            "IMAGE_SIZE": list(config.IMAGE_SIZE),
+            "KERNEL_SIZE": config.KERNEL_SIZE,
+            "SEARCH_RANGE_X": config.SEARCH_RANGE_X,
+            "EDGE_TH": config.EDGE_TH,
+            "DISP_MAX": config.DISP_MAX,
+        },
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "source_type": type(source).__name__,
+    }
+    (outputs_dir / "meta.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _draw_hud(img: np.ndarray, *, fps: float | None, ms: float, valid: int, frame_id: int) -> None:
@@ -160,6 +216,7 @@ def run(
     session: str | None = None,
     window_name: str = "rt-tilted-dfd",
     log_every: int = 30,
+    params_path: str | None = None,
 ) -> None:
     """ライブ取得→処理→表示→（消費フレームのみ）録画のループ本体。
 
@@ -167,6 +224,8 @@ def run(
     「取得スレッド停止 → join → source release → ウィンドウ破棄」を必ず通す。`with` の __enter__ が
     raise した場合 __exit__ は呼ばれないが、source 側（camera.py）が掴んだハンドルを自前で release
     する規約なので、ここでは外側 finally でウィンドウ破棄のみ保証すればよい。
+
+    params_path: 録画セッションの meta.json（B-6）に記録する起動時の --params 文字列（任意）。
     """
     if not isinstance(source, FrameSource):
         raise ValueError(f"run: source は FrameSource を想定。実際は {type(source)!r}")
@@ -175,6 +234,7 @@ def run(
         session = session or time.strftime("%Y%m%d_%H%M%S")  # 既定は起動時刻。--session で固定可
         captures_dir, outputs_dir = _ensure_session_dirs(session)
         logger.info("録画セッション: captures=%s, outputs=%s", captures_dir, outputs_dir)
+        _write_session_meta(outputs_dir, params, params_path, source)
     else:
         captures_dir, outputs_dir = None, None
     processed = 0                                     # 処理フレーム数。captures/outputs の連番 index と 1:1
@@ -224,7 +284,12 @@ def run(
                         break
             finally:
                 grabber.stop_and_join()
-                grabber.raise_if_error()               # 取得スレッドの例外を顕在化（無ければ no-op）
+                if sys.exc_info()[0] is not None:
+                    # 計算ループ側の例外で finally に入った場合、grabber 側の例外で
+                    # 元例外を置換しない（真因を保持する・2026-07 レビュー）。記録のみ行う。
+                    grabber.log_error_if_any()
+                else:
+                    grabber.raise_if_error()           # 取得スレッドの例外を顕在化（無ければ no-op）
     finally:
         cv2.destroyAllWindows()
 
@@ -258,8 +323,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="rt-tilted-dfd リアルタイム実行（Phase C）")
     parser.add_argument("--source", choices=("webcam", "video", "still"), default="webcam")
     parser.add_argument("--path", default=None, help="video/still 用の入力パス")
-    parser.add_argument("--params", default=str(config.BASELINE_PARAMS_PATH),
-                        help="fit_result.csv のパス（既定: baseline。FR-8 後に live へ差し替え）")
+    parser.add_argument("--params", default=str(config.PARAMS_PATH),
+                        help="fit_result.csv のパス（既定: live＝root。baseline を使う場合は明示指定）")
     parser.add_argument("--loop", action="store_true", help="video source を EOF で巻き戻して継続")
     parser.add_argument("--no-record", action="store_true", help="録画を無効化")
     parser.add_argument("--no-viz", action="store_true", help="colormap PNG(viz) の保存を無効化")
@@ -274,7 +339,7 @@ def main(argv: list[str] | None = None) -> None:
     params = load_params(args.params)                  # 起動時に1回だけ（ループ内で再計算しない・§4.1）
     source = _build_source(args)
     run(source, params, record=not args.no_record, save_viz=not args.no_viz,
-        session=args.session)
+        session=args.session, params_path=args.params)
 
 
 if __name__ == "__main__":

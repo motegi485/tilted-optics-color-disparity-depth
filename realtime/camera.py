@@ -37,6 +37,10 @@ def preprocess(raw: np.ndarray) -> np.ndarray:
         raise ValueError(
             f"preprocess: raw は {config.WEBCAM_NATIVE_SIZE} (W,H) を想定。実際は {(w, h)}"
         )
+    if config.WEBCAM_CROP_W > w:
+        raise ValueError(
+            f"preprocess: WEBCAM_CROP_W({config.WEBCAM_CROP_W}) が raw 幅({w})を超えています（負インデックス crop 防止）"
+        )
     x0 = (w - config.WEBCAM_CROP_W) // 2            # 中央クロップの左端: (1280-1080)//2 = 100
     crop = raw[:, x0:x0 + config.WEBCAM_CROP_W]     # 縦は全行保持・横のみ 1080 に（3:2）。view なのでコピーなし
     return cv2.resize(crop, config.IMAGE_SIZE, interpolation=cv2.INTER_AREA)
@@ -98,6 +102,8 @@ class WebcamSource(FrameSource):
         self.cap: cv2.VideoCapture | None = None    # None＝未オープン。このクラスの唯一の状態
 
     def open(self) -> None:
+        if self.cap is not None:
+            raise RuntimeError("WebcamSource: 多重 open です（先に release してください）")
         cap = cv2.VideoCapture(self.index, self.backend)
         if not cap.isOpened():
             cap.release()                           # 掴みかけた local ハンドルを解放してから raise
@@ -143,7 +149,9 @@ class WebcamSource(FrameSource):
                 if ok and f is not None:
                     frames.append(f)
                     last = f
-            if len(frames) >= 2:
+            if not frames:
+                time.sleep(0.05)                    # read 全滅（一時的な取得失敗）時の busy loop 緩和
+            elif len(frames) >= 2:
                 # 時間方向の画素ばらつき: 静止画面≈0 / 実フィード>0。バーストで見るので
                 # たまたま重複フレームを1枚読んでも誤判定しにくい。
                 tstd = float(np.stack(frames).astype(np.float32).std(axis=0).mean())
@@ -200,6 +208,8 @@ class VideoFileSource(FrameSource):
         self.cap: cv2.VideoCapture | None = None
 
     def open(self) -> None:
+        if self.cap is not None:
+            raise RuntimeError("VideoFileSource: 多重 open です（先に release してください）")
         if not self.path.exists():
             raise FileNotFoundError(f"VideoFileSource: クリップが見つかりません: {self.path}")
         cap = cv2.VideoCapture(str(self.path))
@@ -214,7 +224,14 @@ class VideoFileSource(FrameSource):
             if not ok or f is None:
                 raise RuntimeError(f"VideoFileSource: 先頭フレームを読めません: {self.path}")
             _verify_native(f, "VideoFileSource.open")
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)     # 検証で進めた位置を巻き戻す（lossless 前提）
+            rewound = cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 検証で進めた位置を巻き戻す（lossless 前提）
+            if not rewound:
+                # バックエンドによっては set() が失敗することがある。release→再 open で確実に先頭へ戻す。
+                cap.release()
+                cap = cv2.VideoCapture(str(self.path))
+                if not cap.isOpened():
+                    raise RuntimeError(f"VideoFileSource: 巻き戻しのための再 open に失敗しました: {self.path}")
+                self.cap = cap
         except BaseException:
             self.release()
             raise
