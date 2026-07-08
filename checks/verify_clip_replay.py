@@ -10,7 +10,11 @@ preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化な
 照合ロジックは verify_pipeline_equivalence.py(task3)と同じ流儀(NaN 位置一致を確認して
 から有限値をビット比較)。
 
-params は録画時と同じものを使う必要がある(runner 既定＝baseline。--params で上書き可)。
+params は録画時と同じものを使う必要がある。--params 未指定時は outputs/{session}/meta.json
+（B-6・録画開始時に runner.py が書く）があればその params_path を自動採用し、無ければ
+live＝root fit_result.csv を既定とする。--params を明示指定すれば常にそちらが優先される。
+FR-8 以前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
+いるため、再検証時は --params params/baseline/fit_result.csv を明示すること。
 
 実行: uv run python -m checks.verify_clip_replay --session 20260624_153000
 """
@@ -24,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import argparse
+import json
 
 import cv2
 import numpy as np
@@ -43,6 +48,10 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
     if not np.array_equal(nan_live, nan_re):
         n = int(np.count_nonzero(nan_live != nan_re))
         return False, f"NaN 位置不一致: {n} 画素"
+    if np.count_nonzero(~nan_live) == 0:
+        # 両者とも全 NaN だと空集合同士の比較で match 判定が真になり得るため無条件 FAIL とする
+        # (Phase D の Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー)。
+        return False, "有効画素 0 — 入力・params・ゲートを確認"
     # NaN 位置が一致している前提で、有限値(同じマスク)をビット比較する
     if not np.array_equal(live[~nan_live], recomputed[~nan_live]):
         diff = np.abs(live[~nan_live] - recomputed[~nan_live])
@@ -52,11 +61,21 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
+    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(description="§9.2 クリップ再生・再現一致の検証")
     parser.add_argument("--session", required=True,
                         help="セッション名(captures/{session}, outputs/{session} を照合)")
-    parser.add_argument("--params", default=str(config.BASELINE_PARAMS_PATH),
-                        help="fit_result.csv のパス(録画時と同じものを使う。既定: baseline)")
+    parser.add_argument("--params", default=None,
+                        help="fit_result.csv のパス(録画時と同じものを使う。既定: セッションの "
+                             "meta.json があればそれを採用、無ければ live＝root。baseline を使う"
+                             "場合は明示指定)")
     args = parser.parse_args(argv)
 
     cap_dir = Path(config.CAPTURES_DIR) / args.session
@@ -73,8 +92,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] {cap_dir} に連番 png(??????.png)がありません")
         return 2
 
-    params = load_params(args.params)
-    print(f"session={args.session}  frames={len(pngs)}  params={args.params}")
+    if args.params is not None:
+        params_path = args.params
+        print(f"params: 明示指定 {params_path}")
+    else:
+        meta_path = out_dir / "meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            params_path = meta["params_path"]
+            print(f"params: meta.json から採用 {params_path}（B-6）")
+        else:
+            params_path = str(config.PARAMS_PATH)
+            print(f"params: meta.json 無し。既定(live) {params_path}")
+
+    params = load_params(params_path)
+    print(f"session={args.session}  frames={len(pngs)}  params={params_path}")
 
     n_ok = 0
     first_fail: str | None = None

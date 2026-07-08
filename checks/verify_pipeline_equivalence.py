@@ -65,6 +65,14 @@ def evaluate_core_depthmap(frame, params):
 
 
 def main():
+    # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
+    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     params = load_params(config.BASELINE_PARAMS_PATH)
     name, frame = load_fixture()
     print(f"固定入力: {name}  shape={frame.shape}  dtype={frame.dtype}")
@@ -83,6 +91,12 @@ def main():
     valid = depth_A[(depth_A > config.DEPTH_MIN) & (depth_A < config.DEPTH_MAX)]
     print(f"dtype(A)={depth_A.dtype}  有効画素={n_finite}  gate2後有効={valid.size}")
     print(f"NaN 位置一致: {nan_match}  /  有限値ビット一致: {finite_match}")
+
+    # 両経路とも全 NaN だと空集合同士の比較で match 判定が真になり得るため、
+    # 有効画素 0 は無条件で FAIL とする（Phase D の Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー）。
+    if n_finite == 0:
+        print("[FAIL] 有効画素 0 — 入力・params・ゲートを確認")
+        return 1
 
     if nan_match and finite_match:
         print("PASS: process_frame は evaluate.py core パスとビット一致")
