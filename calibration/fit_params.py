@@ -47,6 +47,11 @@ PARAM_KEYS = ["v_pos", "u_pos", "w_pos", "a_pos",
 REQUIRED_COLS = {"depth", "zero_disp_pos", "zero_disp_neg", "a_pos", "a_neg"}
 
 
+def _filter_finite(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    """isfinite でその列の NaN 行(RANSAC コンセンサス不成立相当)のみを除外する(値域は制限しない)。"""
+    return df[np.isfinite(df[col])].copy()
+
+
 def model(z, v, u):
     """参照式 y0 = v/z + u（w=0 固定の2パラメータ）。
 
@@ -75,6 +80,14 @@ def _fit_branch(depths, zero_disp, label):
 
 
 def main():
+    # Windows の日本語コンソール(cp932)は「ā」等の非対応文字の print で UnicodeEncodeError を
+    # 出すため UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     # --- 入口チェック: 入力ファイルと必要列の存在を先に確認する（入力検証は raise） ---
     if not config.PARAMS_CSV_PATH.exists():
         raise FileNotFoundError(
@@ -89,11 +102,12 @@ def main():
             f"（{config.PARAMS_CSV_PATH}）")
 
     # --- フィッティング失敗行の除外（pos/neg を独立にフィルタ） ---
-    # zero_disp は「視差0の y 座標」。画像の y 方向は数百px のため有効な切片は数十px 以上になる。
-    # RANSAC コンセンサス不成立の行は calibrate.py が NaN を書く。`NaN > MIN_VALID_PX` は False に
-    # なるため、ここで NaN 行は自動的に落ちる（0埋めをしない設計＝要件書 §4.1 と整合）。
-    df_pos = df[df["zero_disp_pos"] > config.MIN_VALID_PX].copy()
-    df_neg = df[df["zero_disp_neg"] > config.MIN_VALID_PX].copy()
+    # RANSAC コンセンサス不成立の行は calibrate.py が NaN を書く。isfinite でその行のみを除外する
+    # （値域は制限しない）。参照式 y0(z) = v/z + u は z が大きいほど y0 → u に漸近するため、
+    # 「zero_disp > 定数」という旧フィルタは Phase E の長距離校正で正当な小/負の切片行を無警告で
+    # 落としてしまう（2026-07 レビューで撤廃・旧 MIN_VALID_PX）。
+    df_pos = _filter_finite(df, "zero_disp_pos")
+    df_neg = _filter_finite(df, "zero_disp_neg")
 
     # 各枝3点未満では参照式（2パラメータ）を安定にフィットできない → 校正不能として停止
     if len(df_pos) < 3 or len(df_neg) < 3:

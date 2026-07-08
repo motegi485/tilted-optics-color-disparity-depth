@@ -1,7 +1,7 @@
 [project]
 name = "rt-tilted-dfd-system"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time monocular depth estimation using tilted optics (Scheimpflug) and split color-filter aperture"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -11,4 +11,9 @@ dependencies = [
     "pandas>=3.0.3",
     "scikit-learn>=1.9.0",
     "scipy>=1.17.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
 ]

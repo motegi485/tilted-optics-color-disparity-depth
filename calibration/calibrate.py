@@ -18,6 +18,7 @@ calibration/calibrate.py
 # --- サブパッケージから root の config / core を import するためのブートストラップ ---
 # 推奨実行は `uv run python -m calibration.calibrate`(root を cwd に)。
 # 直接実行 `python calibration/calibrate.py` でも動くよう root を sys.path に通す。
+import argparse
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,10 +31,6 @@ import config
 from core.disparity import calcDisparityByZNCC
 from sklearn.linear_model import RANSACRegressor
 
-
-# ===== 表示専用(数値再現には影響しない) =====
-SHOW_PLOT = True                       # True で距離ごとに散布図＋RANSAC直線を表示(インライヤマスクの目視検証)
-# PLOT_MAX_POINTS = 3000               # (旧)散布図の表示点数上限。現在は全点描画
 
 IMG_EXTS = {".jpg", ".jpeg", ".png"}   # 校正画像として扱う拡張子
 
@@ -81,6 +78,12 @@ def _plot_branch(ax, d_vals, row_vals, mask, a, b, height_px, color, label):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="校正画像 → 視差 → 直線フィット → params.csv")
+    parser.add_argument("--show-plot", action="store_true",
+                        help="距離ごとに散布図＋RANSAC直線を表示する（既定: 非表示。CI/一気通貫実行を"
+                             "ブロックしないため既定オフ）")
+    args = parser.parse_args()
+
     # --- 入口チェック: 校正画像ディレクトリと画像の存在を先に確認する ---
     calib_dir = config.CALIB_IMGS_DIR
     if not calib_dir.is_dir():
@@ -90,6 +93,29 @@ def main():
                          if p.suffix.lower() in IMG_EXTS)
     if not image_paths:
         raise FileNotFoundError(f"キャリブレーション画像が見つかりません: {calib_dir}")
+
+    # --- 入力ガード(2026-07 レビュー): 距離名ファイルの規格混在・重複距離を事前検出する ---
+    # webcam(.png)と静止画(.jpg/.jpeg)が同一キャンペーンに混在すると、1本の params.csv に
+    # 異規格が無警告で統合され§6.3の混用禁止に違反するため、ループに入る前に止める。
+    dist_paths: dict[int, list[Path]] = {}
+    for p in image_paths:
+        try:
+            d = int(p.stem)
+        except ValueError:
+            continue  # 距離名でないファイルは後段のループで従来どおりスキップ表示される
+        dist_paths.setdefault(d, []).append(p)
+
+    dist_exts = {p.suffix.lower() for paths in dist_paths.values() for p in paths}
+    if (".png" in dist_exts) and ({".jpg", ".jpeg"} & dist_exts):
+        raise ValueError(
+            "webcam(.png) と静止画(.jpg) の校正画像が混在しています。"
+            "キャンペーン単位で単一規格にしてください"
+        )
+
+    duplicates = {d: paths for d, paths in dist_paths.items() if len(paths) > 1}
+    if duplicates:
+        detail = "; ".join(f"{d}mm={[p.name for p in paths]}" for d, paths in sorted(duplicates.items()))
+        raise ValueError(f"同一距離の校正画像が重複しています（{detail}）。1距離1ファイルにしてください")
 
     low, height = config.DISP_PLOT_LOW, config.DISP_PLOT_HEIGHT
     rows_out = []                              # 距離ごとの結果を貯め、ループ後に一括で CSV 化する
@@ -107,6 +133,21 @@ def main():
         if image is None:                      # 壊れた画像など読み込み失敗時は None が返る
             print(f"スキップ: 画像読み込み失敗 → {path.name}")
             continue
+
+        # 入力ガード(2026-07 レビュー): 処理解像度そのもの、または3:2アスペクト比(±1%)の
+        # フル解像度静止画のみ許可する。raw(1280x720=16:9等)の誤投入は非等方リサイズで
+        # 幾何が歪んだ params を無警告生成するため、ここで止める。
+        h_raw, w_raw = image.shape[:2]
+        if (w_raw, h_raw) != config.IMAGE_SIZE:
+            expected_ratio = config.IMAGE_SIZE[0] / config.IMAGE_SIZE[1]   # 3:2
+            actual_ratio = w_raw / h_raw
+            if abs(actual_ratio - expected_ratio) / expected_ratio > 0.01:
+                raise ValueError(
+                    f"校正画像のサイズ・アスペクト比が不正です → {path.name}: "
+                    f"実 shape=(W={w_raw},H={h_raw})（比={actual_ratio:.4f}）。"
+                    f"期待は処理解像度 {config.IMAGE_SIZE} 一致、"
+                    f"またはアスペクト比 3:2（={expected_ratio:.4f}）±1% のフル解像度静止画"
+                )
         image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる(§6.1)
 
         # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる(§2.1)
@@ -159,7 +200,7 @@ def main():
         })
 
         # 散布図でインライヤ(色)/アウトライヤ(灰)と RANSAC 直線を確認(表示専用)
-        if SHOW_PLOT:
+        if args.show_plot:
             import matplotlib.pyplot as plt
             h_px = image.shape[0]
             fig, ax = plt.subplots()

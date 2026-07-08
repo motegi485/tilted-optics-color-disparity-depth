@@ -86,7 +86,7 @@ def prompt_distance() -> int | None:
 
 
 def _ask_yes_no(message: str) -> bool:
-    """y/n を受け取る。y/yes→True, n/no→True 以外。判別不能は再入力。"""
+    """y/n を受け取る。y/yes→True、n/no→False。それ以外は再入力。"""
     while True:
         ans = input(f"{message} (y/n): ").strip().lower()
         if ans in {"y", "yes"}:
@@ -101,14 +101,14 @@ def capture_burst(source: WebcamSource, n: int) -> np.ndarray | None:
 
     平均は raw float64 累積 → /N → uint8（preprocess は呼び出し側で平均後に1回だけ適用する）。
     crop と INTER_AREA は線形なので「各フレーム preprocess 後に平均」と概ね等価だが、丸めを1回に
-    抑え計算も軽い raw 平均 → 単一 preprocess を採る（要件書 §3.4）。
+    抑え計算も軽い raw 平均 → 単一 preprocess を採る（要件書 §5.4）。
 
     フレーム同一性: WebcamSource は frame_id を持たないため、直前に採用したフレームとの完全一致
     （np.array_equal）で重複を検出し skip する。実フィードはセンサノイズで毎フレーム必ず変動する
     （_wait_until_live が時間 std>0 で確認済み）ため、固着していない限り N 枚は速やかに揃う。
     バースト開始からの経過時間が BURST_TIMEOUT_S（time.monotonic() 基準）を超えたらフィード固着
     とみなし None を返す（呼び出し側で撮り直し可能に）。
-    read 失敗時も None を返し、半端・破損した平均は書き込ませない（要件書 §3.10）。
+    read 失敗時も None を返し、半端・破損した平均は書き込ませない（要件書 §5.4）。
     """
     if n < 1:
         raise ValueError(f"capture_burst: n は 1 以上が必要です（渡された値: {n}）")
@@ -143,7 +143,7 @@ def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
     """preprocess 済み (352,528,3) BGR を PNG（可逆）で out_dir/{dist}.png に保存する。
 
     webcam は既に 4:2:0 で R/B 横解像が落ちているため、JPEG 保存による二重クロマ間引きを避ける
-    （PNG 必須・要件書 §3.5）。保存前に shape=(352,528,3) を検証（IMAGE_SIZE 整合）。
+    （PNG 必須・要件書 §5.4）。保存前に shape=(352,528,3) を検証（IMAGE_SIZE 整合）。
     既存ファイルがあり allow_overwrite=False のときは上書き確認を行い、否なら保存せず False を返す。
     """
     expected = (config.IMAGE_SIZE[1], config.IMAGE_SIZE[0], 3)  # (H,W,3)=(352,528,3)
@@ -165,7 +165,7 @@ def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
 
 
 def run_subfunc_check(proc_bgr: np.ndarray) -> None:
-    """保存した (528,352) で視差を試算し、撮影品質を即時に診断する（要件書 §3.6・任意）。
+    """保存した (528,352) で視差を試算し、撮影品質を即時に診断する（要件書 §5.4・任意）。
 
     pipeline/evaluate と同一のチャンネル分割（cv2.split の BGR 順で G を破棄し blue/red を割当）と
     同一 gate1（|d|>DISP_MAX を NaN）を当て、有効点数・pos/neg 点数・|d| 最大・clip 警告・
@@ -207,7 +207,7 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
 
 
 def _startup_guard() -> bool:
-    """起動時に calib_imgs/ の現状を表示し、想定外/既存 PNG があれば続行可否を確認する（§3.9）。
+    """起動時に calib_imgs/ の現状を表示し、想定外/既存 PNG があれば続行可否を確認する（§5.4）。
 
     続行してよければ True、中止なら False を返す。空ディレクトリ（または未作成）はそのまま True。
     """
@@ -233,12 +233,12 @@ def _startup_guard() -> bool:
 def _capture_one_distance(source: WebcamSource, dist: int, n: int) -> None:
     """1 距離分の撮影フロー: バースト → preprocess → 保存 → サブフィット(任意) → 撮り直し(任意)。
 
-    撮り直し=n になるまでループする。撮り直し時は明示的上書きを許可する（要件書 §3.7）。
+    撮り直し=n になるまでループする。撮り直し時は明示的上書きを許可する（要件書 §5.4）。
     """
     is_reshoot = False
     while True:
         print(f"--- {dist}mm: バースト撮影（{n} 枚平均）。ターゲット/カメラを静止させてください ---")
-        print("    （WB に加え露出も手動固定であること。露出変動は平均を狂わせます・§3.4）")
+        print("    （WB に加え露出も手動固定であること。露出変動は平均を狂わせます）")
         raw_avg = capture_burst(source, n)
         if raw_avg is None:
             # read 失敗・固着。半端な平均は書かない。撮り直し可否のみ尋ねる
@@ -314,7 +314,7 @@ def main() -> None:
     try:
         run(args.n)
     except KeyboardInterrupt:
-        # with WebcamSource が __exit__ で release 済み。メッセージのみ出して終了
+        # run() の finally で release 済み。メッセージのみ出して終了
         print("\n中断しました（Ctrl-C）。webcam は解放済みです。")
 
 

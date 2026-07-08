@@ -33,7 +33,7 @@ EDGE_TH = 30            # 校正・推論で統一
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
 DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 15。search 半幅と一致
 DEPTH_MIN = 0
-DEPTH_MAX = 5000
+DEPTH_MAX = 50000  # 先行研究の参考コードの現行 Z 範囲。一時変更する場合は必ず戻すこと（2026-06 に 5000 のまま残留した事故あり）
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====
@@ -46,9 +46,6 @@ RANSAC_RESIDUAL_TH  = 8.0  # インライヤ残差閾値 [row]。None なら skl
 RANSAC_RANDOM_STATE = 0    # シード固定（再現性確保）
 RANSAC_MIN_POINTS   = 10   # 有効な点の個数 n_pos/n_neg が、ぞれぞれフィットを始めるのに十分な数があるかの閾値
 
-# ===== キャリブレーション: 参照式フィット (calibration/fit_params.py) =====
-MIN_VALID_PX = 10  # zero_disp(切片: y 座標の px 値) がこれ以下の距離行はフィット失敗として除外
-
 # ===== webcam capture =====
 CAPTURE_BACKEND      = cv2.CAP_MSMF      # 実測で DSHOW は暗フレーム → MSMF
 CAPTURE_DEVICE_INDEX = 0
@@ -58,7 +55,5 @@ LIVE_WAIT_TIMEOUT_S = 8.0    # 実フィード待ちの上限（cold-start 実�
 LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.0 / live≈1.3
 
 # ===== 機材設定値 =====
-TILT_THETA_DEG = 30.0  # カメラの傾き角度 [deg]
-LENS_TILT_ANGLE = 30.0  # レンズの傾き角度 [deg]
-CAMERA_HEIGHT = 24.5 # カメラの高さ [cm]
-VIDEO_FRAME_RESOLUTION = (1280, 720) # ビデオフレームの解像度 (width, height)
+TILT_THETA_DEG = 30.0  # レンズ傾斜角θ [deg]（§2.2 権威値・Phase A/B/C の数値計算には未使用）
+CAMERA_HEIGHT_MM = 245.0  # 撮影条件メタデータ（§6.3）【実測値確認】

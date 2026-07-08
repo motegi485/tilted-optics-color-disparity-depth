@@ -88,6 +88,13 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
             sim_peak = sim_array[max_x]
             sim_pos = sim_array[max_x + 1]
 
+            # タイ・プラトー（sim_peak が両隣と同値以下）は視差を確定できないため無効化する。
+            # 全シフト同値（blue 平坦・飽和で cv2.matchTemplate(TM_CCOEFF_NORMED) が定数パッチに
+            # 対し常に同一値を返す場合など）に d=±(s_range-1) の偽視差が量産されるのを防ぐ
+            # （2026-07 レビュー・合成テストで確認）。
+            if not (sim_peak > sim_neg and sim_peak > sim_pos):
+                continue  # NaN のまま
+
             denominator = 4 * sim_peak - 2 * sim_neg - 2 * sim_pos
             # 放物線が上に凸（denominator > 0）かつ補正量 ≤ 0.5px のときのみ適用
             if denominator > 0 and abs(sim_pos - sim_neg) <= denominator:
