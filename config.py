@@ -27,13 +27,13 @@ IMAGE_SIZE = (528, 352)
 
 # ===== 視差算出 (core/disparity.py へ注入) =====
 KERNEL_SIZE = 17
-SEARCH_RANGE_X = 31      # 奇数。Phase E で拡大
+SEARCH_RANGE_X = 31      # 奇数。長距離化で拡大
 EDGE_TH = 30            # 校正・推論で統一
 
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
 DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 15。search 半幅と一致
 DEPTH_MIN = 0
-DEPTH_MAX = 50000  # 先行研究の参考コードの現行 Z 範囲。一時変更する場合は必ず戻すこと（2026-06 に 5000 のまま残留した事故あり）
+DEPTH_MAX = 50000  # 先行研究の参考コードの現行 Z 範囲。一時変更する場合は必ず戻すこと
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====
@@ -52,8 +52,14 @@ CAPTURE_DEVICE_INDEX = 0
 WEBCAM_NATIVE_SIZE   = (1280, 720)       # (W,H) 実測ネイティブ。preprocess/source で検証(raise)
 WEBCAM_CROP_W        = 1080              # 3:2 中央クロップ幅（高さは720全行）
 LIVE_WAIT_TIMEOUT_S = 8.0    # 実フィード待ちの上限（cold-start 実測 ~3.3s に余裕）
-LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.0 / live≈1.3
+LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.0 / live≈1.3）
+
+# ===== セッション動画（閲覧デバッグ専用。canonical は連番 PNG/npy のまま）=====
+SESSION_VIDEO_FPS = 30.0                      # 記録tickの目標fps。webcam実効fpsに合わせ等倍再生で実時間になる
+SESSION_VIDEO_FOURCC = "mp4v"                 # OpenCV同梱FFmpegで追加DLL不要（avc1はWindowsで非同梱のことがある）
+SESSION_VIDEO_RAW_NAME = "video_raw.mp4"      # captures/{session}/ 直下（前処理後FOVの連続録画）
+SESSION_VIDEO_DEPTH_NAME = "video_depth.mp4"  # outputs/{session}/ 直下（表示そのまま・サンプル&ホールド）
 
 # ===== 機材設定値 =====
-TILT_THETA_DEG = 30.0  # レンズ傾斜角θ [deg]（§2.2 権威値・Phase A/B/C の数値計算には未使用）
-CAMERA_HEIGHT_MM = 245.0  # 撮影条件メタデータ（§6.3）【実測値確認】
+TILT_THETA_DEG = 30.0  # レンズ傾斜角θ [deg]
+CAMERA_HEIGHT_MM = 245.0  # 撮影条件メタデータ

@@ -31,6 +31,9 @@ realtime/ は core ではない（config import・I/O・cv2・threading を持�
 §9.2 のクリップ再生「再現一致」検証（録った raw を1フレームずつ決定的に再生してライブ depth と
 一致を確認）は、フレームを間引かない別ドライバの役割（連番PNG再生 source の camera.py 追加と
 あわせて別途用意する）。本 runner はライブ取得（中間破棄あり）が責務。
+
+`--record-video`（既定 OFF）: 上記とは別に、セッション全長の閲覧用動画（raw/depth・§7.3）を
+専用スレッドで記録できる。canonical な連番 PNG/npy には一切影響しない付加機能。
 """
 from __future__ import annotations
 
@@ -64,17 +67,19 @@ def to_colormap(depth: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
 
     gate2 の「表示側適用」の実体: [vmin, vmax]=[DEPTH_MIN, DEPTH_MAX] を 0..255 へ線形
     マッピングして固定スケールでカラーマップ化する（毎フレーム自動スケールしないことで、
-    動画として見たとき色変化＝被写体変化と読める）。NaN（測定不能）は近接(z≈0=青)と
-    弁別するため専用色（黒）で塗る。車載では警告/制動などの判断は元 depth(npy)を読む前提で、
-    これはあくまで人間が眺めるための投影（情報を落とした見た目であり判断根拠にはしない）。
+    動画として見たとき色変化＝被写体変化と読める）。JET は小さい値ほど青・大きい値ほど赤
+    になる並びのため、反転（255-u8）してから適用し「近いほど赤・遠いほど青」にする。
+    NaN（測定不能）は近接(z≈0=赤)と弁別するため専用色（黒）で塗る。車載では警告/制動などの
+    判断は元 depth(npy)を読む前提で、これはあくまで人間が眺めるための投影（情報を落とした
+    見た目であり判断根拠にはしない）。
     """
     if vmax <= vmin:
         raise ValueError(f"to_colormap: vmax({vmax}) は vmin({vmin}) より大きい必要があります")
     invalid = np.isnan(depth)                         # 無効画素の位置を先に確保（潰す前に）
     scaled = (np.nan_to_num(depth, nan=vmin) - vmin) / (vmax - vmin) * 255.0
     u8 = np.clip(scaled, 0, 255).astype(np.uint8)     # NaN を uint8 へ直接 astype すると不定値化するため必ず潰してから
-    color = cv2.applyColorMap(u8, cv2.COLORMAP_JET)
-    color[invalid] = (0, 0, 0)                        # 無効は黒（青=近接 と一目で弁別）
+    color = cv2.applyColorMap(255 - u8, cv2.COLORMAP_JET)  # 反転: 近い(小さいz)ほど赤、遠い(大きいz)ほど青
+    color[invalid] = (0, 0, 0)                        # 無効は黒（赤=近接 と一目で弁別）
     return color
 
 
@@ -146,6 +151,169 @@ class _FrameGrabber:
             logger.error("frame-grabber 内で例外が発生していました（記録のみ）: %r", self._error)
 
 
+class _LatestFrameSlot:
+    """録画スレッドへ HUD 付き表示画像を1枚受け渡す単一スロット（§7.3 セッション動画）。
+
+    _FrameGrabber と同型の「参照を上書き」パターンだが、ロックは _FrameGrabber とは別インスタンス
+    にして両者を結合させない。メインループが公開する color は毎イテレーション to_colormap で
+    新規生成され、公開（_draw_hud 後）以降メインループ側では二度と変更しないため、copy せず
+    参照共有でよい（_FrameGrabber._loop の raw と同じ根拠）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._frame: np.ndarray | None = None
+
+    def update(self, frame: np.ndarray) -> None:
+        with self._lock:
+            self._frame = frame
+
+    def latest(self) -> np.ndarray | None:
+        with self._lock:
+            return self._frame
+
+
+def _open_video_writer(
+    path: Path,
+    *,
+    fps: float,
+    fourcc: str,
+    frame_size: tuple[int, int],
+    writer_factory=cv2.VideoWriter,
+) -> cv2.VideoWriter:
+    """VideoWriter を開く。失敗時は release してから raise（壊れた動画を黙って残さない）。"""
+    writer = writer_factory(str(path), cv2.VideoWriter_fourcc(*fourcc), fps, frame_size)
+    if not writer.isOpened():
+        writer.release()
+        raise RuntimeError(
+            f"セッション動画の VideoWriter を開けません: {path} "
+            f"(fourcc={fourcc!r}, fps={fps}, size={frame_size})。コーデックが利用可能か確認してください"
+        )
+    return writer
+
+
+class _SessionVideoRecorder:
+    """セッション全長の閲覧用動画（raw/depth）を録画する専用スレッド（§7.3）。
+
+    grabber・メインループの計算ホットパスとは完全に分離する: raw は grabber.latest()
+    （既存の複数リーダー安全なロック保護アクセサ）を、depth は display_slot（_LatestFrameSlot）を、
+    それぞれ自スレッドの一定周期で読むだけで、書き込み側をブロックしない。
+
+    depth 側は「新しい計算結果が出るまで直前の絵を繰り返す」サンプル&ホールドで、raw と同じ
+    tick 数だけ書く（不変条件: 1 tick につき両方書くか両方書かないかの二択。2動画のフレーム数を
+    常に一致させ、並べて再生したときのタイムラインを揃える＝計算遅延の可視化という目的の要）。
+    """
+
+    def __init__(
+        self,
+        raw_path: Path,
+        depth_path: Path,
+        display_slot: _LatestFrameSlot,
+        *,
+        fps: float,
+        fourcc: str,
+        frame_size: tuple[int, int],
+        writer_factory=cv2.VideoWriter,
+    ) -> None:
+        if fps <= 0:
+            raise ValueError(f"_SessionVideoRecorder: fps は正である必要があります（実際: {fps}）")
+        self._display_slot = display_slot
+        self._interval = 1.0 / fps
+        self._black = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
+
+        self._raw_writer = _open_video_writer(
+            raw_path, fps=fps, fourcc=fourcc, frame_size=frame_size, writer_factory=writer_factory)
+        try:
+            self._depth_writer = _open_video_writer(
+                depth_path, fps=fps, fourcc=fourcc, frame_size=frame_size, writer_factory=writer_factory)
+        except BaseException:
+            self._raw_writer.release()                 # 2本目失敗時に1本目のハンドルをリークさせない
+            raise
+
+        self._grabber = None
+        self._stop = threading.Event()
+        self._error: BaseException | None = None
+        self._released = False
+        self.frames_written = 0
+        self.ticks_skipped = 0
+        self._thread = threading.Thread(target=self._loop, name="session-video-recorder", daemon=True)
+
+    def start(self, grabber) -> None:
+        if not hasattr(grabber, "latest") or not hasattr(grabber, "stopped"):
+            raise ValueError("_SessionVideoRecorder.start: grabber は latest()/stopped を持つ必要があります")
+        self._grabber = grabber
+        self._thread.start()
+
+    def _write_one_tick(self) -> None:
+        raw, _fid = self._grabber.latest()
+        if raw is None:                                # grabber 起動直後のごく短い窓（不変条件: 両方スキップ）
+            return
+        proc = preprocess(raw)                          # メインループと同一の共有前処理（安価。ZNCC は通らない）
+        # cv2.VideoWriter.write は C++ 側が void のため、この OpenCV ビルド（4.13）は None を返す
+        # （bool を返す cv2.imwrite とは異なる）。None は「失敗」ではなく「情報無し」なので、
+        # 明示的に False が返った場合のみ失敗として扱う（テストの fake writer は bool を返す）。
+        if self._raw_writer.write(proc) is False:
+            raise RuntimeError("session-video-recorder: raw VideoWriter.write が失敗しました")
+        disp = self._display_slot.latest()
+        frame = disp if disp is not None else self._black  # サンプル&ホールドの実体（無ければ黒＝既存の無効色規約）
+        if self._depth_writer.write(frame) is False:
+            raise RuntimeError("session-video-recorder: depth VideoWriter.write が失敗しました")
+        self.frames_written += 1
+
+    def _loop(self) -> None:
+        try:
+            next_due = time.perf_counter()
+            while not self._stop.is_set() and not self._grabber.stopped:
+                now = time.perf_counter()
+                if now < next_due:
+                    if self._stop.wait(next_due - now):  # 停止要求に即応答（sleep でなく Event.wait）
+                        break
+                    continue
+                self._write_one_tick()
+                next_due += self._interval
+                if next_due < time.perf_counter():       # エンコードが interval を超過：重複書きで追いつこうとしない
+                    self.ticks_skipped += 1
+                    next_due = time.perf_counter() + self._interval
+        except BaseException as e:                        # grabber と同型: 飲み込まず保持して main へ運ぶ
+            self._error = e
+        finally:
+            self._stop.set()
+
+    def stop_and_join(self, timeout: float = 2.0) -> None:
+        self._stop.set()
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            logger.warning("session-video-recorder が %.1fs 以内に終了しませんでした。追加で最大5.0s 待機します", timeout)
+            self._thread.join(5.0)
+            if self._thread.is_alive():
+                logger.warning("session-video-recorder がまだ終了していません。処理を続行します")
+        self.ensure_released()
+
+    def ensure_released(self) -> None:
+        """release() の冪等な公開版（構築後・スレッド起動前に例外が飛ぶ経路の保険）。"""
+        if self._released:
+            return
+        self._released = True
+        for name, writer in (("raw", self._raw_writer), ("depth", self._depth_writer)):
+            try:
+                writer.release()
+            except Exception as e:
+                logger.error("session-video-recorder: %s VideoWriter の release に失敗しました: %r", name, e)
+
+    @property
+    def stopped(self) -> bool:
+        return self._stop.is_set()
+
+    def raise_if_error(self) -> None:
+        if self._error is not None:
+            raise self._error
+
+    def log_error_if_any(self) -> None:
+        """raise_if_error の非 raise 版。計算ループ側の例外を優先したい finally 節で使う。"""
+        if self._error is not None:
+            logger.error("session-video-recorder 内で例外が発生していました（記録のみ）: %r", self._error)
+
+
 def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     # 録画を実行（セッション）ごとに分離する。captures/{session}, outputs/{session} に保存する
     # 実行を跨いだ連番（000000..）の上書き・混在を論理的に防ぐ（§9.2 のクリーン再現は
@@ -165,14 +333,33 @@ def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     return captures, outputs
 
 
+def _session_video_paths(captures_dir: Path, outputs_dir: Path) -> tuple[Path, Path]:
+    """セッション動画（§7.3）の raw/depth 出力先。captures/outputs の既存分離を踏襲する。"""
+    return captures_dir / config.SESSION_VIDEO_RAW_NAME, outputs_dir / config.SESSION_VIDEO_DEPTH_NAME
+
+
 def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str | None,
-                        source: FrameSource) -> None:
+                        source: FrameSource, *, record_video: bool = False) -> None:
     """録画セッションの使用 params・config・起動条件を outputs/{session}/meta.json に記録する（B-6）。
 
     「録画時と同じ params を使う」制約（§9.2）が人間の記憶頼みだと、A-2 の既定変更（live）以降は
     過去セッション（baseline 録画）との不一致事故が起きやすい。verify_clip_replay.py がこれを
     自動参照できるようにする。
+
+    session_video は record_video が False でも常に記録する（{"enabled": false}）。後からセッションを
+    見たとき「動画が無いのは仕様か、本機能実装前の古いセッションか」を meta.json だけで判別できる
+    ようにするため（§7.3）。
     """
+    if record_video:
+        session_video = {
+            "enabled": True,
+            "fps": config.SESSION_VIDEO_FPS,
+            "fourcc": config.SESSION_VIDEO_FOURCC,
+            "raw": config.SESSION_VIDEO_RAW_NAME,
+            "depth": config.SESSION_VIDEO_DEPTH_NAME,
+        }
+    else:
+        session_video = {"enabled": False}
     meta = {
         "params_path": params_path,
         "params": {
@@ -188,6 +375,7 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
         },
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "source_type": type(source).__name__,
+        "session_video": session_video,
     }
     (outputs_dir / "meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -213,6 +401,7 @@ def run(
     *,
     record: bool = True,
     save_viz: bool = True,
+    record_video: bool = False,
     session: str | None = None,
     window_name: str = "rt-tilted-dfd",
     log_every: int = 30,
@@ -226,25 +415,41 @@ def run(
     する規約なので、ここでは外側 finally でウィンドウ破棄のみ保証すればよい。
 
     params_path: 録画セッションの meta.json（B-6）に記録する起動時の --params 文字列（任意）。
+    record_video: セッション全長の閲覧用動画（raw/depth・§7.3）を録画するか。既定 False（オプトイン）。
+        raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth は表示そのままをサンプル&ホールドで記録し、
+        専用スレッド（_SessionVideoRecorder）で行うため計算ループの dt 計測窓には一切干渉しない。
     """
     if not isinstance(source, FrameSource):
         raise ValueError(f"run: source は FrameSource を想定。実際は {type(source)!r}")
 
-    if record:
+    if record or record_video:
         session = session or time.strftime("%Y%m%d_%H%M%S")  # 既定は起動時刻。--session で固定可
         captures_dir, outputs_dir = _ensure_session_dirs(session)
         logger.info("録画セッション: captures=%s, outputs=%s", captures_dir, outputs_dir)
-        _write_session_meta(outputs_dir, params, params_path, source)
+        _write_session_meta(outputs_dir, params, params_path, source, record_video=record_video)
     else:
         captures_dir, outputs_dir = None, None
     processed = 0                                     # 処理フレーム数。captures/outputs の連番 index と 1:1
     last_id = -1
     ema_fps: float | None = None                      # 処理レートの指数移動平均（表示用の平滑値）
 
+    display_slot: _LatestFrameSlot | None = None
+    recorder: _SessionVideoRecorder | None = None
+    if record_video:
+        display_slot = _LatestFrameSlot()
+        raw_video_path, depth_video_path = _session_video_paths(captures_dir, outputs_dir)
+        # webcam の cold-start 待ち（with source の __enter__、最大 LIVE_WAIT_TIMEOUT_S）より前に
+        # writer を開き、コーデック不在等をフェイルファストで検知する。
+        recorder = _SessionVideoRecorder(
+            raw_video_path, depth_video_path, display_slot,
+            fps=config.SESSION_VIDEO_FPS, fourcc=config.SESSION_VIDEO_FOURCC, frame_size=config.IMAGE_SIZE)
+
     try:
         with source as src:                           # __enter__ で open
             grabber = _FrameGrabber(src)
             grabber.start()
+            if recorder is not None:
+                recorder.start(grabber)
             try:
                 while True:
                     raw, fid = grabber.latest()
@@ -278,23 +483,36 @@ def run(
                     processed += 1                      # 連番 index と処理数（先頭=0。log は 0,log_every,... で発火）
 
                     _draw_hud(color, fps=ema_fps, ms=dt * 1000.0, valid=n_valid, frame_id=fid)
+                    if display_slot is not None:        # セッション動画の depth 側（サンプル&ホールドの供給元）
+                        display_slot.update(color)
                     cv2.imshow(window_name, color)
                     key = cv2.waitKey(1) & 0xFF
                     if key in (ord("q"), 27):          # q or ESC で終了
                         break
             finally:
+                if recorder is not None:
+                    recorder.stop_and_join()           # grabber より先に止める（セッション終了後の書き込みを止める）
                 grabber.stop_and_join()
                 if sys.exc_info()[0] is not None:
-                    # 計算ループ側の例外で finally に入った場合、grabber 側の例外で
+                    # 計算ループ側の例外で finally に入った場合、grabber/recorder 側の例外で
                     # 元例外を置換しない（真因を保持する・2026-07 レビュー）。記録のみ行う。
                     grabber.log_error_if_any()
+                    if recorder is not None:
+                        recorder.log_error_if_any()
                 else:
                     grabber.raise_if_error()           # 取得スレッドの例外を顕在化（無ければ no-op）
+                    if recorder is not None:
+                        recorder.raise_if_error()      # 動画書き込み失敗を静かに握り潰さない
     finally:
+        if recorder is not None:
+            recorder.ensure_released()                 # source.__enter__ が raise した経路の保険（冪等）
         cv2.destroyAllWindows()
 
     logger.info("runner 終了: 処理フレーム数=%d, 最終 fps~%s",
                 processed, f"{ema_fps:.3f}" if ema_fps is not None else "n/a")
+    if recorder is not None:
+        logger.info("セッション動画: 書き込み=%d フレーム, 遅延ティック=%d",
+                    recorder.frames_written, recorder.ticks_skipped)
 
 
 def _build_source(args: argparse.Namespace) -> FrameSource:
@@ -328,6 +546,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--loop", action="store_true", help="video source を EOF で巻き戻して継続")
     parser.add_argument("--no-record", action="store_true", help="録画を無効化")
     parser.add_argument("--no-viz", action="store_true", help="colormap PNG(viz) の保存を無効化")
+    parser.add_argument("--record-video", action="store_true",
+                        help="セッション全長の閲覧用動画を録画する（captures/{session}/video_raw.mp4 と "
+                             "outputs/{session}/video_depth.mp4）。raw は前処理後FOVの連続~30fps、"
+                             "depth は直近の計算結果を保持表示（サンプル&ホールド）。既定: 無効")
     parser.add_argument("--session", default=None,
                         help="録画セッション名（既定: 起動時刻 YYYYmmdd_HHMMSS）。"
                              "captures/{session}, outputs/{session} に保存")
@@ -339,7 +561,7 @@ def main(argv: list[str] | None = None) -> None:
     params = load_params(args.params)                  # 起動時に1回だけ（ループ内で再計算しない・§4.1）
     source = _build_source(args)
     run(source, params, record=not args.no_record, save_viz=not args.no_viz,
-        session=args.session, params_path=args.params)
+        record_video=args.record_video, session=args.session, params_path=args.params)
 
 
 if __name__ == "__main__":
