@@ -1,0 +1,23 @@
+[package]
+name = "rt-disparity"
+version = "0.1.1"
+edition = "2021"
+
+[lib]
+# Python 側 import 名（core/disparity.py から `import _rt_disparity_native` で読む）
+name = "_rt_disparity_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Python連携の標準バインディング（Phase 0 スパイクで Python 3.14 + maturin 1.14 との組合せを実機確認済み）
+pyo3 = { version = "0.27", features = ["extension-module"] }
+# numpy配列とのゼロコピー連携（PyReadonlyArray2 / PyArray2）
+numpy = "0.27"
+# 行単位のデータ並列化（Phase 3 で使用。rayon はデータレース安全性をコンパイル時に保証する事実上の標準クレート）
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# panic="abort" は使わない: PyO3 は Rust panic を Python 例外に変換するのに unwind を要する

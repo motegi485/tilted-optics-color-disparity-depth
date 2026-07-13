@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rt-disparity-native"
+version = "0.1.1"
+requires-python = ">=3.14"
+description = "calcDisparityByZNCC の Rust(PyO3) 実装（core/disparity.py から呼び出す内部拡張）"
+
+[tool.maturin]
+module-name = "_rt_disparity_native"

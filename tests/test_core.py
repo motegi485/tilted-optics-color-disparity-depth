@@ -1,34 +1,92 @@
-"""core/disparity.py・core/depth.py・core/params.py の HW 非依存テスト（合成 numpy 配列のみ）。"""
+"""core/disparity.py・core/depth.py・core/params.py の HW 非依存テスト（合成 numpy 配列のみ）。
+
+calcDisparityByZNCC の挙動テストは core.disparity（Phase D で Rust 実装への薄いラッパーに
+差し替え済み）と core._disparity_reference（凍結 Python 参照実装）の両方でパラメトライズする。
+Rust↔Python の数値照合そのものは checks/verify_disparity_rust.py が広いコーパスで担うが、
+ここでの二重化は「どちらの実装も契約（ValueError・既知シフト・タイ→NaN）を満たす」ことを
+pytest の通常回帰網の中で恒久的に守るためのもの（2026-07 のコードレビュー指摘）。
+"""
 import numpy as np
 import pytest
 
-from core.disparity import calcDisparityByZNCC
+from core.disparity import calcDisparityByZNCC as calc_rust
+from core._disparity_reference import calcDisparityByZNCC as calc_python
 from core.depth import compute_depth
 from core.params import DepthParams
 
 
 K, S, TH = 17, 31, 30
 
+_IMPLS = [
+    pytest.param(calc_rust, id="rust"),
+    pytest.param(calc_python, id="python"),
+]
+
 
 # ===== calcDisparityByZNCC: 入力検証 =====
 
-def test_calc_disparity_even_kernel_raises():
+@pytest.mark.parametrize("calc_fn", _IMPLS)
+def test_calc_disparity_even_kernel_raises(calc_fn):
     img = np.zeros((40, 100), dtype=np.uint8)
     with pytest.raises(ValueError):
-        calcDisparityByZNCC(img, img, 16, S, TH)
+        calc_fn(img, img, 16, S, TH)
 
 
-def test_calc_disparity_even_search_raises():
+@pytest.mark.parametrize("calc_fn", _IMPLS)
+def test_calc_disparity_even_search_raises(calc_fn):
     img = np.zeros((40, 100), dtype=np.uint8)
     with pytest.raises(ValueError):
-        calcDisparityByZNCC(img, img, K, 30, TH)
+        calc_fn(img, img, K, 30, TH)
 
 
-def test_calc_disparity_non_2d_raises():
+@pytest.mark.parametrize("calc_fn", _IMPLS)
+def test_calc_disparity_non_2d_raises(calc_fn):
     img3d = np.zeros((40, 100, 3), dtype=np.uint8)
     img2d = np.zeros((40, 100), dtype=np.uint8)
     with pytest.raises(ValueError):
-        calcDisparityByZNCC(img3d, img2d, K, S, TH)
+        calc_fn(img3d, img2d, K, S, TH)
+
+
+# ===== calcDisparityByZNCC: ラッパー(core.disparity)のみの入力契約（2026-07-13 レビュー） =====
+# 参照実装(core._disparity_reference)は凍結のため対象外。参照実装のこれらの入力への挙動は
+# 契約外（float64 は cv2.error、負の kernel_size は負インデックス回り込み等）であり、
+# ラッパーで ValueError に統一する（§4.1 リスク#10。PyO3 の TypeError/OverflowError 漏れの封止）。
+
+def test_calc_disparity_wrapper_non_uint8_raises():
+    img32 = np.zeros((40, 100), dtype=np.float32)
+    img64 = np.zeros((40, 100), dtype=np.float64)
+    for img in (img32, img64):
+        with pytest.raises(ValueError):
+            calc_rust(img, img, K, S, TH)
+
+
+def test_calc_disparity_wrapper_negative_params_raise():
+    img = np.zeros((40, 100), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        calc_rust(img, img, -3, S, TH)   # -3 % 2 == 1 なので奇数チェックだけでは通過してしまう
+    with pytest.raises(ValueError):
+        calc_rust(img, img, K, -5, TH)
+
+
+def test_calc_disparity_wrapper_non_integer_params_raise():
+    img = np.zeros((40, 100), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        calc_rust(img, img, 17.0, S, TH)
+    with pytest.raises(ValueError):
+        calc_rust(img, img, K, 31.0, TH)
+
+
+def test_calc_disparity_wrapper_empty_image_raises():
+    empty = np.zeros((5, 0), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        calc_rust(empty, empty, 1, 1, TH)
+
+
+def test_calc_disparity_wrapper_shape_mismatch_raises():
+    red = np.zeros((40, 100), dtype=np.uint8)
+    blue = np.zeros((40, 90), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        calc_rust(red, blue, K, S, TH)
 
 
 # ===== calcDisparityByZNCC: 既知シフトでの符号・値の再現 =====
@@ -45,14 +103,15 @@ def _make_pattern(width: int, height: int, edge_col: int) -> np.ndarray:
     return np.broadcast_to(pattern, (height, width)).copy()
 
 
+@pytest.mark.parametrize("calc_fn", _IMPLS)
 @pytest.mark.parametrize("shift", [1, -1, 3, -3, 7, -7])
-def test_calc_disparity_known_shift(shift):
+def test_calc_disparity_known_shift(shift, calc_fn):
     """blue(c) = red(c+shift) の関係を作ると d ≈ shift になる(§2.7 の視差定義どおり)。"""
     width, height, edge_col = 140, 40, 70
     red = _make_pattern(width, height, edge_col)
     blue = _make_pattern(width, height, edge_col - shift)
 
-    disp = calcDisparityByZNCC(red, blue, K, S, TH)
+    disp = calc_fn(red, blue, K, S, TH)
     valid = ~np.isnan(disp)
     assert int(valid.sum()) > 0, "有効画素が0（パターン設計を見直すこと）"
     vals = disp[valid]
@@ -61,15 +120,16 @@ def test_calc_disparity_known_shift(shift):
 
 # ===== calcDisparityByZNCC: C-1 タイ・プラトー → NaN =====
 
+@pytest.mark.parametrize("calc_fn", _IMPLS)
 @pytest.mark.parametrize("blue_const", [128, 255])
-def test_calc_disparity_flat_blue_becomes_all_nan(blue_const):
+def test_calc_disparity_flat_blue_becomes_all_nan(blue_const, calc_fn):
     """blue が全面定数（平坦・飽和）だと全シフト同値のタイになり、有効画素は0になる(C-1)。"""
     height, width = 60, 100
     red = np.full((height, width), 50, dtype=np.uint8)
     red[:, 50:] = 200   # 縦エッジ1本
     blue = np.full((height, width), blue_const, dtype=np.uint8)
 
-    disp = calcDisparityByZNCC(red, blue, K, S, TH)
+    disp = calc_fn(red, blue, K, S, TH)
     assert int(np.count_nonzero(~np.isnan(disp))) == 0
 
 

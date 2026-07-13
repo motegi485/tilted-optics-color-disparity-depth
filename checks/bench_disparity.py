@@ -21,7 +21,6 @@ import cv2
 import numpy as np
 
 import config
-from core.disparity import calcDisparityByZNCC
 from core.params import DepthParams
 from realtime.camera import preprocess
 from realtime.pipeline import process_frame
@@ -75,14 +74,27 @@ def _edge_pixel_count(red: np.ndarray) -> int:
     return int(np.count_nonzero(edge))
 
 
-def _bench(fn, n: int) -> tuple[float, float]:
-    """fn を n 回計測し (平均ms, 最小ms) を返す。"""
+def _bench(fn, n: int) -> tuple[float, float, float]:
+    """fn を1回ウォームアップ実行（計測対象外。rayonスレッドプール初期化等を計測から除く）した後、
+    n 回計測し (平均ms, 最小ms, p95ms) を返す。"""
+    fn()  # warmup
     times = []
     for _ in range(n):
         t0 = time.perf_counter()
         fn()
         times.append((time.perf_counter() - t0) * 1000.0)
-    return float(np.mean(times)), float(np.min(times))
+    return float(np.mean(times)), float(np.min(times)), float(np.percentile(times, 95))
+
+
+def _resolve_disparity_fn(impl: str):
+    """--impl python: core._disparity_reference（凍結 Python 参照実装）。
+    --impl native: core.disparity（Phase D で Rust 実装への薄いラッパーに差し替え済み）。
+    """
+    if impl == "python":
+        from core._disparity_reference import calcDisparityByZNCC
+        return calcDisparityByZNCC
+    from core.disparity import calcDisparityByZNCC
+    return calcDisparityByZNCC
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,7 +109,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Phase D 用ベンチ: disparity/process_frame の ms/frame 計測")
     parser.add_argument("--source", choices=("test", "captures", "synthetic"), default="synthetic")
     parser.add_argument("--session", default=None, help="--source captures 用のセッション名")
-    parser.add_argument("--n", type=int, default=5, help="計測回数（既定5）")
+    parser.add_argument("--n", type=int, default=5, help="計測回数（既定5。1回のwarmupは別途・計測対象外）")
+    parser.add_argument("--impl", choices=("native", "python"), default="native",
+                         help="native=core.disparity（Rust 実装への薄いラッパー） / "
+                              "python=core._disparity_reference（既定native）")
     args = parser.parse_args(argv)
 
     if args.source == "synthetic":
@@ -112,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     blue, _, red = cv2.split(frame)
     E = _edge_pixel_count(red)
 
+    calcDisparityByZNCC = _resolve_disparity_fn(args.impl)
+
     disp_holder: dict[str, np.ndarray] = {}
 
     def run_disparity():
@@ -121,21 +138,34 @@ def main(argv: list[str] | None = None) -> int:
     def run_pipeline():
         process_frame(frame, _BENCH_PARAMS)
 
-    mean_d, min_d = _bench(run_disparity, args.n)
+    mean_d, min_d, p95_d = _bench(run_disparity, args.n)
     n_valid = int(np.count_nonzero(~np.isnan(disp_holder["d"])))
-    mean_p, min_p = _bench(run_pipeline, args.n)
 
-    print(f"入力: {name}  shape={frame.shape}  N={args.n}")
+    print(f"入力: {name}  shape={frame.shape}  N={args.n}  impl={args.impl}")
     print(f"E(エッジ画素数)={E}  S(search)={config.SEARCH_RANGE_X}  K(kernel)={config.KERNEL_SIZE}  "
           f"有効視差画素数={n_valid}")
-    print(f"calcDisparityByZNCC: 平均={mean_d:.1f}ms  最小={min_d:.1f}ms")
-    print(f"process_frame(全体):  平均={mean_p:.1f}ms  最小={min_p:.1f}ms")
+    print(f"calcDisparityByZNCC[{args.impl}]: 平均={mean_d:.2f}ms  最小={min_d:.2f}ms  p95={p95_d:.2f}ms")
+
+    # process_frame(全体) は realtime/pipeline.py 内で `from core.disparity import
+    # calcDisparityByZNCC` と固定 import しているため、--impl の値によらず常に core.disparity
+    # （Phase D 差し替え後は Rust 実装）を使う。--impl python 選択時は disparity 単体の数値のみが
+    # Python 参照実装になり、process_frame(全体) の数値とは実装が食い違う点に注意。
+    mean_p, min_p, p95_p = _bench(run_pipeline, args.n)
+    print(f"process_frame(全体・常にcore.disparity経由): 平均={mean_p:.2f}ms  最小={min_p:.2f}ms  p95={p95_p:.2f}ms"
+          + ("" if args.impl == "native" else "  [注意: disparity単体はpython参照実装だがこちらは常にcore.disparity]"))
 
     # Phase D の同条件比較にそのまま使える機械可読な1行サマリ（§8.3）
-    print(f"BENCH source={args.source} name={name} E={E} S={config.SEARCH_RANGE_X} "
+    print(f"BENCH source={args.source} name={name} impl={args.impl} E={E} S={config.SEARCH_RANGE_X} "
           f"K={config.KERNEL_SIZE} n_valid={n_valid} "
-          f"disp_mean_ms={mean_d:.3f} disp_min_ms={min_d:.3f} "
+          f"disp_mean_ms={mean_d:.3f} disp_min_ms={min_d:.3f} disp_p95_ms={p95_d:.3f} "
           f"pipeline_mean_ms={mean_p:.3f} pipeline_min_ms={min_p:.3f}")
+
+    budget_ms = 1000.0 / 30.0
+    if args.impl == "native":
+        verdict_d = "PASS" if p95_d < budget_ms else "FAIL"
+        verdict_p = "PASS" if p95_p < budget_ms else "FAIL"
+        print(f"[{verdict_d}] disparity単体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_d:.2f}ms")
+        print(f"[{verdict_p}] process_frame全体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_p:.2f}ms")
     return 0
 
 
