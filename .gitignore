@@ -23,7 +23,7 @@ target/
 .claude/settings.local.json
 CLAUDE.local.md
 
-# 実行時の生成物（必要に応じて）
+# 実行時の生成物
 data/calib_imgs/*
 !data/calib_imgs/.gitkeep
 data/captures/*
@@ -32,5 +32,3 @@ data/test/*
 !data/test/.gitkeep
 outputs/*
 !outputs/.gitkeep
-params/*
-!params/.gitkeep
