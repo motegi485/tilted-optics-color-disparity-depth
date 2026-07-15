@@ -3,7 +3,7 @@
 データフロー（§4.3 オンライン）を組み立てる:
     source.read() -> raw(1280x720) -> preprocess -> proc(352,528,3)
       -> pipeline.process_frame(proc, params) -> depth_map(NaN 伝播)
-      -> 表示（gate2 を vmin/vmax で適用・カラーマップ）＋FPS
+      -> 表示（gate2 を vmin/vmax で適用・カラーマップ＋距離凡例のカラーバー）＋FPS
       -> 録画（消費フレームのみ: raw->captures/, depth->outputs/）
 
 実行: リポジトリ root から `uv run python -m realtime.runner --source webcam`
@@ -19,6 +19,9 @@ gate2（Z レンジ 0<z<50000）はここ（表示側）で vmin/vmax として�
 返す depth マップは書き換えない（書き換えると evaluate.py の depth マップとビット一致しなく
 なる・§9.2）。録画する depth は NaN を保持した float32 をそのまま np.save する（唯一の真実）。
 表示用カラーマップは使い捨てコピー上で NaN を潰すだけで、元 depth には触れない。
+カラーバー（距離→色の凡例・draw_colorbar）は to_colormap 直後にこのコピーへ焼き込むため、
+保存する viz.png にも含まれる（HUD の FPS 等はこの後さらに焼き込むため、ライブ表示と
+セッション動画のみに残る・viz.png はクリーンなカラーマップ＋カラーバーで統一）。
 
 realtime/ は core ではない（config import・I/O・cv2・threading を持ってよい・§4.1）。
 計算の中核は持たず pipeline.process_frame（→ core 純関数）を呼ぶだけ。
@@ -81,6 +84,50 @@ def to_colormap(depth: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     color = cv2.applyColorMap(255 - u8, cv2.COLORMAP_JET)  # 反転: 近い(小さいz)ほど赤、遠い(大きいz)ほど青
     color[invalid] = (0, 0, 0)                        # 無効は黒（赤=近接 と一目で弁別）
     return color
+
+
+def draw_colorbar(img: np.ndarray, vmin: float, vmax: float, *, num_ticks: int = 6) -> None:
+    """深度マップ右端に距離→色の対応を示す縦カラーバーを重ね描きする（in-place）。
+
+    to_colormap と同じ反転 JET マッピング（近い(小さいz)ほど赤・遠い(大きいz)ほど青）をバー内で
+    再現し、近距離(赤)をバー下端・遠距離(青)をバー上端に置く（値が下から上へ増加する、通常の
+    グラフ縦軸と同じ向き）。目盛りラベルは mm 表記（config.DEPTH_MIN/DEPTH_MAX の生値）。
+    黒の太線+白の細線の二重描画で、_draw_hud と同様に背景色に依らず読めるようにする。
+    """
+    if vmax <= vmin:
+        raise ValueError(f"draw_colorbar: vmax({vmax}) は vmin({vmin}) より大きい必要があります")
+    if num_ticks < 2:
+        raise ValueError(f"draw_colorbar: num_ticks は2以上が必要です（実際: {num_ticks}）")
+    h, w = img.shape[:2]
+    bar_w, margin_right, margin_tb = 16, 6, 14
+    x2 = w - margin_right
+    x1 = x2 - bar_w
+    y1 = margin_tb
+    y2 = h - margin_tb
+    bar_h = y2 - y1
+    if x1 < 0 or bar_h < num_ticks:
+        raise ValueError(f"draw_colorbar: 画像が小さすぎます（shape={img.shape}）")
+
+    frac = np.arange(bar_h) / (bar_h - 1)               # 0(上端)→1(下端)
+    depth_col = vmax - frac * (vmax - vmin)              # 上端=vmax(遠)→下端=vmin(近)
+    u8 = np.clip((depth_col - vmin) / (vmax - vmin) * 255.0, 0, 255).astype(np.uint8)
+    gradient = cv2.applyColorMap(255 - u8, cv2.COLORMAP_JET).reshape(bar_h, 1, 3)  # to_colormap と同じ反転
+    img[y1:y2, x1:x2] = np.repeat(gradient, bar_w, axis=1)
+
+    cv2.rectangle(img, (x1 - 1, y1 - 1), (x2, y2), (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.rectangle(img, (x1, y1), (x2 - 1, y2 - 1), (255, 255, 255), 1, cv2.LINE_AA)
+
+    for i in range(num_ticks):
+        t = i / (num_ticks - 1)                          # 0(上端)→1(下端)
+        y = int(round(y1 + t * (bar_h - 1)))
+        val = vmax - t * (vmax - vmin)
+        label = f"{val:.0f}"
+        cv2.line(img, (x1 - 5, y), (x1 - 1, y), (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.line(img, (x1 - 5, y), (x1 - 1, y), (255, 255, 255), 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
+        tx, ty = x1 - 8 - tw, y + th // 2
+        cv2.putText(img, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(img, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
 
 
 class _FrameGrabber:
@@ -402,6 +449,7 @@ def run(
     record: bool = True,
     save_viz: bool = True,
     record_video: bool = False,
+    colorbar: bool = True,
     session: str | None = None,
     window_name: str = "rt-tilted-dfd",
     log_every: int = 30,
@@ -418,6 +466,10 @@ def run(
     record_video: セッション全長の閲覧用動画（raw/depth・§7.3）を録画するか。既定 False（オプトイン）。
         raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth は表示そのままをサンプル&ホールドで記録し、
         専用スレッド（_SessionVideoRecorder）で行うため計算ループの dt 計測窓には一切干渉しない。
+    colorbar: 距離→色の対応を示す凡例（draw_colorbar）を焼き込むか。既定 True。to_colormap 直後・
+        HUD 描画より前に color へ焼き込むため、HUD（FPS 等・ライブ表示とセッション動画のみ）とは
+        異なり、保存する viz.png にも含まれる（viz.png は human-viewing 専用で数値検証には使われない
+        ため、焼き込んでも§9.2 の再現一致検証やevaluate.py の回帰には影響しない）。
     """
     if not isinstance(source, FrameSource):
         raise ValueError(f"run: source は FrameSource を想定。実際は {type(source)!r}")
@@ -466,6 +518,8 @@ def run(
                     dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（Phase D ベンチの素データ）
 
                     color = to_colormap(depth, config.DEPTH_MIN, config.DEPTH_MAX)  # クリーン版を1回だけ生成
+                    if colorbar:
+                        draw_colorbar(color, config.DEPTH_MIN, config.DEPTH_MAX)  # 保存する viz にも含める
 
                     if record:                         # 消費フレームのみ保存（raw->captures, depth->outputs）
                         idx = processed
@@ -546,6 +600,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--loop", action="store_true", help="video source を EOF で巻き戻して継続")
     parser.add_argument("--no-record", action="store_true", help="録画を無効化")
     parser.add_argument("--no-viz", action="store_true", help="colormap PNG(viz) の保存を無効化")
+    parser.add_argument("--no-colorbar", action="store_true",
+                        help="距離→色の対応を示すカラーバー凡例の描画を無効化")
     parser.add_argument("--record-video", action="store_true",
                         help="セッション全長の閲覧用動画を録画する（captures/{session}/video_raw.mp4 と "
                              "outputs/{session}/video_depth.mp4）。raw は前処理後FOVの連続~30fps、"
@@ -561,7 +617,8 @@ def main(argv: list[str] | None = None) -> None:
     params = load_params(args.params)                  # 起動時に1回だけ（ループ内で再計算しない・§4.1）
     source = _build_source(args)
     run(source, params, record=not args.no_record, save_viz=not args.no_viz,
-        record_video=args.record_video, session=args.session, params_path=args.params)
+        record_video=args.record_video, colorbar=not args.no_colorbar,
+        session=args.session, params_path=args.params)
 
 
 if __name__ == "__main__":

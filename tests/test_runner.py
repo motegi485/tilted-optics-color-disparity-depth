@@ -14,6 +14,7 @@ from realtime.runner import (
     _session_video_paths,
     _SessionVideoRecorder,
     _write_session_meta,
+    draw_colorbar,
     to_colormap,
 )
 
@@ -45,6 +46,55 @@ def test_to_colormap_vmax_le_vmin_raises():
         to_colormap(depth, vmin=100.0, vmax=100.0)
     with pytest.raises(ValueError):
         to_colormap(depth, vmin=100.0, vmax=50.0)
+
+
+# ===== draw_colorbar =====
+
+def test_draw_colorbar_vmax_le_vmin_raises():
+    img = np.zeros((352, 528, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        draw_colorbar(img, vmin=100.0, vmax=100.0)
+    with pytest.raises(ValueError):
+        draw_colorbar(img, vmin=100.0, vmax=50.0)
+
+
+def test_draw_colorbar_num_ticks_below_2_raises():
+    img = np.zeros((352, 528, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        draw_colorbar(img, vmin=0.0, vmax=50000.0, num_ticks=1)
+
+
+def test_draw_colorbar_too_small_image_raises():
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        draw_colorbar(img, vmin=0.0, vmax=50000.0)
+
+
+def test_draw_colorbar_preserves_shape_and_dtype_and_draws_in_place():
+    img = np.zeros((352, 528, 3), dtype=np.uint8)
+    before_id = id(img)
+
+    draw_colorbar(img, vmin=0.0, vmax=50000.0)
+
+    assert img.shape == (352, 528, 3)
+    assert img.dtype == np.uint8
+    assert id(img) == before_id
+    assert img.any()                                   # 何かしら描画されている
+
+
+def test_draw_colorbar_near_red_at_bottom_far_blue_at_top():
+    """近距離(赤)をバー下端、遠距離(青)をバー上端に置く仕様（実装時の確認事項でユーザー指定）。"""
+    img = np.zeros((352, 528, 3), dtype=np.uint8)
+    h, w = img.shape[:2]
+    x_in_bar = w - 12                                   # バー内側の列（margin_right=6, bar_w=16 前提）
+
+    draw_colorbar(img, vmin=0.0, vmax=50000.0)
+
+    top_color = img[20, x_in_bar]                       # 上端寄り
+    bottom_color = img[h - 20, x_in_bar]                 # 下端寄り
+    # BGR 順。赤は R(index2) が高く B(index0) が低い／青はその逆（to_colormap と同じ反転JET規約）。
+    assert int(bottom_color[2]) > int(bottom_color[0])   # 下端: 赤寄り(近距離)
+    assert int(top_color[0]) > int(top_color[2])         # 上端: 青寄り(遠距離)
 
 
 # ===== _ensure_session_dirs (B-5) =====
