@@ -15,9 +15,11 @@ params.csv（calibrate.py の出力）から参照式 y0（d=0のy座標） = v/
 設計原則（要件書 §4.1）:
   - calibration/ は core ではない。config import・I/O 可。scipy/pandas を直接使ってよい。
   - 入力検証は raise（assert は -O で無効化されるため使わない）。
-  - w=0 固定（2パラメータ）。根拠は README §3.3・要件書 §2.4（過剰自由度による非物理解の回避、
-    Michi 経験式・Fukino 式との整合）。w をフリーにしない。
-  - これは経験式（参照式）校正の再現であり、参考論文 §5.2 の幾何モデル校正（A・z_id・θ 同定）とは別物。
+  - w=0 固定（2パラメータ）。根拠は要件書 §2.4（過剰自由度による非物理解の回避、および
+    Fukino et al., IWAIT 2023 式(11) の参照式の形 ȳ = A/z + B との一致）。w をフリーにしない。
+    ※「Michi 経験式との整合」は誤り（Michi ISPACS 2012 式(9) は分母内の定数を持たない別形）。
+      本書 式(2) の4パラメータ形の出所は Fukino et al., ICECET 2024 式(10)(14)。詳細は要件書 §2.4。
+  - これは経験式（参照式）校正の再現であり、参考論文の幾何モデル校正（A・z_id・θ 同定）とは別物。
 
 実行（推奨。リポジトリ root を cwd に）:
     uv run python -m calibration.fit_params
@@ -55,7 +57,7 @@ def _filter_finite(df: pd.DataFrame, col: str) -> pd.DataFrame:
 def model(z, v, u):
     """参照式 y0 = v/z + u（w=0 固定の2パラメータ）。
 
-    w は理論的根拠（要件書 §2.4・README §3.3）で 0 に固定するため、モデル関数の引数に含めない。
+    w は理論的根拠（要件書 §2.4）で 0 に固定するため、モデル関数の引数に含めない。
     w=0 の値そのものは出力側（fit_result.csv の w_pos/w_neg）で明示的に 0.0 として書き出す。
     """
     return v / z + u
