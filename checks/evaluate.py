@@ -1,5 +1,5 @@
 """Phase A 回帰チェック（オーケストレーション層・暫定）。
-core/ の純関数を呼び、先行研究の参考コードの depth.py と同じ集計で比較する。
+core/ の純関数を呼び、既存の参照実装の depth.py と同じ集計で比較する。
 ゲーティングは config 値でこの層が適用する（core は純関数のまま）。
 """
 # --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
@@ -18,7 +18,7 @@ from core.depth import compute_depth
 from core.params import load_params
 
 
-# §9.3 Phase A 回帰アンカー（2026-06-14 確定・DEPTH_MAX=50000 前提）
+# docs/verification-and-tools.md の回帰アンカー（2026-06-14 確定・DEPTH_MAX=50000 前提）
 EXPECTED = {
     "2300.jpg": {"mean": 2313.9, "mae": 316.8, "valid": 7613},
 }

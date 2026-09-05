@@ -1,4 +1,4 @@
-"""verify_clip_replay.py — §9.2 クリップ再生・再現一致の検証(root・camera.py 非依存)。
+"""verify_clip_replay.py — docs/requirements-and-status.md のクリップ再生・再現一致の検証(root・camera.py 非依存)。
 
 ライブ実行で保存した outputs/{session}/{i}.npy(depth・唯一の真実)と、同じ
 captures/{session}/{i}.png を preprocess -> process_frame で再計算した depth が、
@@ -6,7 +6,7 @@ captures/{session}/{i}.png を preprocess -> process_frame で再計算した de
 
 preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化なので、再計算 depth は
 ライブ depth とビット一致するはず。一致＝録画→再生の経路が無劣化で、ライブ結果が保存
-クリップから完全再現可能(Phase D の Python<->Rust 照合 §8.3 の土台)であることの回帰確認。
+クリップから完全再現可能(高速化段階の Python<->Rust 照合〈docs/verification-and-tools.md〉の土台)であることの回帰確認。
 照合ロジックは verify_pipeline_equivalence.py(task3)と同じ流儀(NaN 位置一致を確認して
 から有限値をビット比較)。
 
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="§9.2 クリップ再生・再現一致の検証")
+    parser = argparse.ArgumentParser(description="docs/requirements-and-status.md のクリップ再生・再現一致の検証")
     parser.add_argument("--session", required=True,
                         help="セッション名(captures/{session}, outputs/{session} を照合)")
     parser.add_argument("--params", default=None,
@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     total = len(pngs)
     print(f"\n結果: {n_ok}/{total} フレーム一致")
     if n_ok == total:
-        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= §9.2 クリップ再生・再現一致 達成")
+        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= docs/requirements-and-status.md のクリップ再生・再現一致 達成")
         return 0
     print(f"[FAIL] 不一致あり(最初の不一致フレーム: {first_fail})")
     return 1

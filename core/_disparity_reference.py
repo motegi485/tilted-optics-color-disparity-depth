@@ -1,10 +1,10 @@
 """core/_disparity_reference.py — calcDisparityByZNCC の Python 参照実装（凍結・Phase D）。
 
-Phase D（設計_要件定義書.md §5.6/§8）で core/disparity.py を Rust(PyO3) 実装へ差し替えた際に、
+高速化（Rust移植）段階（詳細は docs/module-core.md）で core/disparity.py を Rust(PyO3) 実装へ差し替えた際に、
 本ファイルへ元の Python 実装をそのまま複製保存したもの。以後の関数本体は変更しない
 （変更する場合は rust/disparity/src/lib.rs と同時に変更し、checks/verify_disparity_rust.py
 で全コーパスを再検証すること）。用途:
-  - Rust 実装との数値照合の「正解」（§8.3）
+  - Rust 実装との数値照合の「正解」（docs/verification-and-tools.md）
   - checks/bench_disparity.py での Python 版 vs Rust 版の速度比較
   - tests/test_core.py の挙動テストを両実装でパラメトライズする際の Python 側
 """

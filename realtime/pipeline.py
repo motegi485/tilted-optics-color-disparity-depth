@@ -1,7 +1,7 @@
-"""realtime/pipeline.py — 毎フレーム処理（§4.3 オンライン・§5.5）。
+"""realtime/pipeline.py — 毎フレーム処理（docs/architecture.md のオンラインデータフロー・docs/module-realtime.md）。
 
 evaluate.py の per-frame core パスと同一手順で depth マップを返す（R/B 分割 →
-ZNCC → gate1(|d|>DISP_MAX) → depth）ことが、ふるまい一致（§9.2）の前提。
+ZNCC → gate1(|d|>DISP_MAX) → depth）ことが、ふるまい一致（docs/requirements-and-status.md）の前提。
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
 core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<50000) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の

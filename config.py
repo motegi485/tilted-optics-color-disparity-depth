@@ -11,7 +11,7 @@ DATA_DIR = ROOT_DIR / "data"
 TEST_DIR = DATA_DIR / "test"
 PARAMS_DIR = ROOT_DIR / "params"
 PARAMS_PATH = PARAMS_DIR / "fit_result.csv"
-CALIB_IMGS_DIR = DATA_DIR / "calib_imgs"                      # 校正画像（距離名.jpg）
+CALIB_IMGS_DIR = DATA_DIR / "calib_imgs"                      # 校正画像（距離名.png/.jpg。キャンペーン内での規格混在は calibrate.py が拒否）
 PARAMS_CSV_PATH = PARAMS_DIR / "params.csv"                   # calibrate.py の出力
 DIAG_CSV_PATH   = PARAMS_DIR / "calibration_diagnostics.csv" # 校正診断サマリ
 CAPTURES_DIR = DATA_DIR / "captures"     # raw 録画先（gitignore）
@@ -33,7 +33,7 @@ EDGE_TH = 30            # 校正・推論で統一
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
 DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 15。search 半幅と一致
 DEPTH_MIN = 0
-DEPTH_MAX = 50000  # 先行研究の参考コードの現行 Z 範囲。一時変更する場合は必ず戻すこと
+DEPTH_MAX = 50000  # 現行の Z 範囲。一時変更する場合は必ず戻すこと
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====

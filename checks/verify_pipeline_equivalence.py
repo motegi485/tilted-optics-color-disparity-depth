@@ -1,6 +1,6 @@
 """verify_pipeline_equivalence.py
 realtime.pipeline.process_frame と evaluate.py の per-frame core パス（集計前の depth マップ）が
-固定入力でビット一致することを検証する（§9.2 Phase C Done 基準の「経路の同値性」）。
+固定入力でビット一致することを検証する（docs/requirements-and-status.md の「経路の同値性」Done基準）。
 
 Path A: realtime.pipeline.process_frame（実モジュール）
 Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → compute_depth）
@@ -66,7 +66,7 @@ def evaluate_core_depthmap(frame, params):
 
 def main():
     # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
-    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    # UTF-8 に固定する（realtime/runner.py の main() 冒頭と同じ対処）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")

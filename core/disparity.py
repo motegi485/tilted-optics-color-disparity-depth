@@ -2,13 +2,13 @@
 
 数値計算は rust/disparity/（PyO3拡張 `_rt_disparity_native`）に委譲する。
 入力の 2D 形状・dtype(uint8)・非空・kernel_size/search_range_x の正の整数・奇数性は
-ここで検証し、既存呼び出し元との ValueError 契約（§4.1 リスク#10）を維持する
+ここで検証し、既存呼び出し元との ValueError 契約（docs/known-issues.md のリスク#10）を維持する
 （PyO3側の型抽出失敗は ValueError ではなく TypeError/OverflowError になるため、
 検証はネイティブ拡張呼び出しの前に済ませる。red/blue の形状不一致のみネイティブ側の
 防御チェックが ValueError を出す）。
 
 Python参照実装は core/_disparity_reference.py に凍結保存されている
-（§8.3 の Rust↔Python 照合・checks/bench_disparity.py の速度比較・checks/verify_disparity_rust.py
+（docs/verification-and-tools.md に記載の Rust↔Python 照合・checks/bench_disparity.py の速度比較・checks/verify_disparity_rust.py
 の回帰ゲートで使用。変更しない）。
 """
 import numpy as np

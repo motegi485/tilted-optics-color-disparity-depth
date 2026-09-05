@@ -1,7 +1,7 @@
-"""checks/bench_disparity.py — Phase D 用ベンチ（§8.2 実測ベンチ駆動）。
+"""checks/bench_disparity.py — 高速化（Rust移植）用ベンチ（docs/module-core.md の実測ベンチ駆動の考え方）。
 
 calcDisparityByZNCC 単体と process_frame 全体の ms/frame を実測し、Phase D の
-Python↔Rust 同条件比較（§8.3）の基礎データを取る。負荷は E(エッジ画素数)×S(search)×K²
+Python↔Rust 同条件比較（docs/verification-and-tools.md）の基礎データを取る。負荷は E(エッジ画素数)×S(search)×K²
 に比例し E は画像内容依存のため、時間だけでなく E を必ず併記する。
 
 実行:
@@ -26,7 +26,7 @@ from realtime.camera import preprocess
 from realtime.pipeline import process_frame
 
 
-# ベンチ専用のダミー係数（時間計測のみが目的。実距離換算には使わない・§6.3 の値とは無関係）
+# ベンチ専用のダミー係数（時間計測のみが目的。実距離換算には使わない・docs/module-calibration.md の値とは無関係）
 _BENCH_PARAMS = DepthParams(
     v_pos=400000.0, u_pos=50.0, a_pos=-30.0, w_pos=0.0,
     v_neg=400000.0, u_neg=50.0, a_neg=-30.0, w_neg=0.0,
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"process_frame(全体・常にcore.disparity経由): 平均={mean_p:.2f}ms  最小={min_p:.2f}ms  p95={p95_p:.2f}ms"
           + ("" if args.impl == "native" else "  [注意: disparity単体はpython参照実装だがこちらは常にcore.disparity]"))
 
-    # Phase D の同条件比較にそのまま使える機械可読な1行サマリ（§8.3）
+    # Phase D の同条件比較にそのまま使える機械可読な1行サマリ（docs/verification-and-tools.md）
     print(f"BENCH source={args.source} name={name} impl={args.impl} E={E} S={config.SEARCH_RANGE_X} "
           f"K={config.KERNEL_SIZE} n_valid={n_valid} "
           f"disp_mean_ms={mean_d:.3f} disp_min_ms={min_d:.3f} disp_p95_ms={p95_d:.3f} "
@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         verdict_p = "PASS" if p95_p < budget_ms else "FAIL"
         print(f"[{verdict_d}] disparity単体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_d:.2f}ms")
         print(f"[{verdict_p}] process_frame全体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_p:.2f}ms")
-        # §5.6 受入基準4（30fps）の機械的ゲートとして使えるよう、判定を終了コードへ接続する
+        # docs/module-core.md の受入基準4（30fps）の機械的ゲートとして使えるよう、判定を終了コードへ接続する
         # （stdout の FAIL を人間が読む前提だと自動化から見て常に成功になる）。
         if verdict_d == "FAIL" or verdict_p == "FAIL":
             return 1

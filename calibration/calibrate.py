@@ -4,12 +4,12 @@ calibration/calibrate.py
 校正画像（ファイル名 = 距離[mm]。.png/.jpg/.jpeg。キャンペーン内での規格混在は下の入力ガードが拒否）から符号付き視差を求め、符号別に per-pixel RANSAC で
 直線 row = a·disparity + b をフィットし、各距離の zero_disp(=切片 b)・傾き a・
 インライヤ率・点数を params/params.csv に出力する。
-（先行研究の参考コードの calibration.py の per-pixel RANSAC 版を rt 構成で再現したもの）
+（既存の参照実装の per-pixel RANSAC 版を本システムの構成で再現したもの）
 
 パイプライン: 校正画像 → 視差(core/disparity) → 符号別の点群抽出 → RANSAC 直線フィット → params.csv
 後段の fit_params.py が params.csv を受け取り、参照式 y0 = v/z + u をフィットする。
 
-設計原則(§4.1):
+設計原則(docs/architecture.md):
   - calibration/ は core ではない。config import・I/O・matplotlib 可。
     ただし視差計算は純関数 core.disparity を config 注入で呼ぶ(校正と推論の設定を一致させる)。
   - 無効値は np.nan(0 埋め禁止)。入力検証は raise(assert は -O で無効化されるため使わない)。
@@ -105,7 +105,7 @@ def main():
 
     # --- 入力ガード(2026-07 レビュー): 距離名ファイルの規格混在・重複距離を事前検出する ---
     # webcam(.png)と静止画(.jpg/.jpeg)が同一キャンペーンに混在すると、1本の params.csv に
-    # 異規格が無警告で統合され§6.3の混用禁止に違反するため、ループに入る前に止める。
+    # 異規格が無警告で統合されdocs/module-calibration.mdの混用禁止に違反するため、ループに入る前に止める。
     dist_paths: dict[int, list[Path]] = {}
     for p in image_paths:
         try:
@@ -157,9 +157,9 @@ def main():
                     f"期待は処理解像度 {config.IMAGE_SIZE} 一致、"
                     f"またはアスペクト比 3:2（={expected_ratio:.4f}）±1% のフル解像度静止画"
                 )
-        image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる(§6.1)
+        image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる(docs/module-calibration.md)
 
-        # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる(§2.1)
+        # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる(docs/theory.md)
         blue, _, red = cv2.split(image)
         # 視差計算は純関数を config 注入で呼ぶ。これで校正・推論の設定一致がコード上で保証される
         disp_map = calcDisparityByZNCC(
@@ -190,7 +190,7 @@ def main():
             print(f"  neg: 直線フィット不成立 → NaN（{e}）")
             a_neg, b_neg, mask_neg = np.nan, np.nan, np.zeros(n_neg, dtype=bool)
 
-        # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値(§6.3)
+        # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値(docs/module-calibration.md)
         inlier_pos = float(mask_pos.mean()) if n_pos else 0.0
         inlier_neg = float(mask_neg.mean()) if n_neg else 0.0
 
@@ -227,7 +227,7 @@ def main():
         raise RuntimeError("有効なキャリブレーション距離が1つもありませんでした。")
 
     config.PARAMS_DIR.mkdir(parents=True, exist_ok=True)
-    # 列順は先行研究の参考コードの params.csv に一致させる(near-match 照合のため)。
+    # 列順は既存の参照実装の params.csv に一致させる(near-match 照合のため)。
     # スキップで追加順が乱れ得るので、距離昇順に並べ直してから出力する
     df = pd.DataFrame(rows_out, columns=[
         "depth", "zero_disp_pos", "zero_disp_neg", "a_pos", "a_neg",
@@ -236,7 +236,7 @@ def main():
     df.to_csv(config.PARAMS_CSV_PATH, index=False)         # fit_params.py への入力(全9列)
     print(f"\n{config.PARAMS_CSV_PATH} に保存（{len(df)} 距離）")
 
-    # 診断サマリ(インライヤ率・点数のみ)。校正品質の記録用(§6.3)
+    # 診断サマリ(インライヤ率・点数のみ)。校正品質の記録用(docs/module-calibration.md)
     df[["depth", "inlier_pos", "inlier_neg", "n_pos", "n_neg"]].to_csv(
         config.DIAG_CSV_PATH, index=False)
     print(f"{config.DIAG_CSV_PATH} に診断サマリを保存")
