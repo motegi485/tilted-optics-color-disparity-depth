@@ -57,6 +57,10 @@ COMBINED_NAME = "video_combined.mp4"  # --export の既定出力名（depth と�
 # 記録側（config.SESSION_VIDEO_FOURCC）と同じコーデック。OpenCV 同梱 FFmpeg で追加 DLL 不要。
 # 本ツールは config を import しない方針（repo 外でも単体で動くため）なので規約値だけを持つ。
 EXPORT_FOURCC = "mp4v"
+# 記録側（config.SESSION_VIDEO_FPS）と同じ規約値。fps が異なる動画（他所由来など）を
+# 無警告で等倍(native fps)再生扱いしないための照合用（EXPORT_FOURCC と同じ理由で config は import しない）。
+EXPECTED_FPS = 30.0
+FPS_MISMATCH_TOL = 0.5  # 許容差（fps）。コンテナ側の丸め誤差程度は許容する
 
 WINDOW = "rt-tilted-dfd : raw | depth  (frame-locked)"
 SPEEDS = [0.25, 0.5, 1.0, 2.0, 4.0]
@@ -127,6 +131,9 @@ class SyncPair:
 
         fps = self.cap_raw.get(cv2.CAP_PROP_FPS)
         self.fps = fps if fps and fps > 1e-3 else 30.0
+        if fps and fps > 1e-3 and abs(fps - EXPECTED_FPS) > FPS_MISMATCH_TOL:
+            print(f"[warn] raw の fps が想定({EXPECTED_FPS:.1f})と異なります: {fps:.2f} "
+                  f"→ この fps のまま等倍(native)再生します", file=sys.stderr)
 
         self._pos = -1  # 直近に retrieve 済みのフレーム番号（-1 = 未読）
 
@@ -303,7 +310,10 @@ def main(argv: list[str] | None = None) -> None:
     idx = 0
     playing = True
     need_render = True
-    next_due = time.perf_counter()
+    # next_due を「今」にすると、ループ最初の pacing 判定が描画前に即座に true になり
+    # idx が 0→1 に進んでしまって frame 0 が一度も描画されない。1 周期分先に置くことで
+    # 最初のループでは frame 0 の描画のみ行い、idx はまだ進めないようにする。
+    next_due = time.perf_counter() + 1.0 / (fps * speed)
 
     while True:
         # --- シーク要求の取り込み（トラックバーのドラッグ） ---

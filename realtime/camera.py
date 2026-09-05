@@ -244,7 +244,19 @@ class VideoFileSource(FrameSource):
         ok, frame = self.cap.read()
         if not ok or frame is None:                 # EOF
             if self.loop:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # backend によっては set() が False を返して巻き戻せない。open() と同じく
+                # release→再 open で確実に先頭へ戻す（seek 失敗を無音の EOF にしない）。
+                if not self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0):
+                    logger.warning(
+                        "VideoFileSource: 先頭への seek に失敗しました。再 open します: %s", self.path)
+                    self.cap.release()
+                    self.cap = None
+                    cap = cv2.VideoCapture(str(self.path))
+                    if not cap.isOpened():
+                        cap.release()
+                        raise RuntimeError(
+                            f"VideoFileSource: loop のための再 open に失敗しました: {self.path}")
+                    self.cap = cap
                 ok, frame = self.cap.read()
                 return (ok, frame if ok else None)
             return False, None

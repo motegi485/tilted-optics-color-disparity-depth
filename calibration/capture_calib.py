@@ -140,7 +140,7 @@ def capture_burst(source: WebcamSource, n: int) -> np.ndarray | None:
 
 def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
                    allow_overwrite: bool) -> bool:
-    """preprocess 済み (352,528,3) BGR を PNG（可逆）で out_dir/{dist}.png に保存する。
+    """preprocess 済み (352,528,3) BGR を PNG（可逆・lossless）で out_dir/{dist}.png に保存する。
 
     webcam は既に 4:2:0 で R/B 横解像が落ちているため、JPEG 保存による二重クロマ間引きを避ける
     （PNG 必須・要件書 §5.4）。保存前に shape=(352,528,3) を検証（IMAGE_SIZE 整合）。
@@ -193,9 +193,19 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
     abs_d = np.abs(disp)
     d_max = float(np.nanmax(abs_d))
     print(f"  [サブフィット] |d| 最大 = {d_max:.2f}px（DISP_MAX={config.DISP_MAX}）")
-    if d_max >= config.DISP_MAX - 0.5:
-        print(f"  → 警告: |d| が探索端 DISP_MAX={config.DISP_MAX} に張り付き/近接しています"
-              "（飽和・探索範囲外の可能性）。")
+    # 探索端の張り付き検知【2026-09 レビューで閾値修正】。
+    # 旧条件 `d_max >= DISP_MAX - 0.5`（=14.5）は到達不能な死にゲートだった: 視差は
+    # d = max_x - s_range + δ、max_x は端2点を除いた [1, S-2]、かつ厳密局所最大の3点放物線
+    # 補間では |δ| < 0.5 が代数的に保証される（A=p-n>0, B=p-q>0 として δ=(A-B)/(2(A+B))）。
+    # よって |d| < DISP_MAX - 0.5 が常に成り立ち、警告は原理的に発火しない。
+    # 実際に意味があるのは「ZNCC ピークが探索できる最外シフト（max_x = S-2、すなわち
+    # |d| > DISP_MAX - 1.5）に載った」ことなので、そこを閾値にし、端ビンの画素率も併記する。
+    edge_bin_th = config.DISP_MAX - 1.5
+    n_edge_bin = int(np.count_nonzero(abs_d > edge_bin_th))
+    if n_edge_bin:
+        print(f"  → 警告: |d| が探索最外ビン（>{edge_bin_th:.1f}px）に載った画素が "
+              f"{n_edge_bin} 個（有効の {n_edge_bin / n_valid * 100:.4f}%、最大 {d_max:.4f}px）。"
+              f"真の視差が探索範囲 ±{config.DISP_MAX}px を超えている可能性があります。")
 
     low, height = config.DISP_PLOT_LOW, config.DISP_PLOT_HEIGHT
     band_pos = int(np.count_nonzero((disp > low) & (disp < height)))
@@ -260,7 +270,7 @@ def _capture_one_distance(source: WebcamSource, dist: int, n: int) -> None:
 
 
 def run(n: int) -> None:
-    """対話ループ本体。webcam を起動時に1度だけ open し、全距離でその1接続を使い回す（§3.2）。"""
+    """対話ループ本体。webcam を起動時に1度だけ open し、全距離でその1接続を使い回す（§5.4・§6.1）。"""
     if not _startup_guard():
         print("中止しました（散布ガード）。")
         return

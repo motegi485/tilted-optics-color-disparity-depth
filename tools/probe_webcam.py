@@ -34,7 +34,6 @@ BACKENDS = [("CAP_DSHOW", cv2.CAP_DSHOW), ("CAP_MSMF", cv2.CAP_MSMF)]
 # 解像度モード探索の候補（要求 → 実際に通る値を確認）
 PROBE_MODES = [(640, 360), (640, 480), (1024, 576), (1280, 720), (1920, 1080)]
 FPS_FRAMES = 300   # 実効 fps 計測のフレーム数
-WARMUP = 30        # ウォームアップで破棄するフレーム数
 
 
 def fourcc_to_str(v) -> str:
@@ -79,6 +78,40 @@ def analyze_color(frame) -> dict:
     }
 
 
+def _wait_until_live(cap: cv2.VideoCapture, timeout_s: float,
+                      burst: int = 5, confirm: int = 2) -> tuple[np.ndarray | None, bool]:
+    """実フィード（時間方向にノイズで変動するフレーム）を検出するまで待つ。
+
+    realtime/camera.py の WebcamSource._wait_until_live と同じ判定方式に揃える:
+    静止プレースホルダ（no-feed 画面）は連続フレームがほぼ完全一致（時間 std≈0）、
+    実フィードは毎フレーム変動する（時間 std>0）ことを burst 内の時間 std で判定し、
+    confirm 回連続で閾値超えを確認してから返す（一過性フレームへの誤 latch を防ぐ）。
+    診断ツールのため raise はせず、timeout 時は (最後に読めたフレーム, False) を返して
+    呼び出し側に判断を委ねる（本ツールは実機診断が目的で、失敗時も得られた情報を残したいため）。
+    """
+    deadline = time.perf_counter() + timeout_s
+    last = None
+    streak = 0
+    while time.perf_counter() < deadline:
+        frames = []
+        for _ in range(burst):
+            ok, f = cap.read()
+            if ok and f is not None:
+                frames.append(f)
+                last = f
+        if not frames:
+            time.sleep(0.05)                    # read 全滅時の busy loop 緩和
+        elif len(frames) >= 2:
+            tstd = float(np.stack(frames).astype(np.float32).std(axis=0).mean())
+            if tstd > config.LIVE_DIFF_STD_TH:
+                streak += 1
+                if streak >= confirm:
+                    return last, True
+            else:
+                streak = 0                       # 非ライブが挟まったら連続カウントをリセット
+    return last, False
+
+
 def probe_backend(name: str, flag: int) -> dict:
     entry: dict = {}
     cap = cv2.VideoCapture(DEVICE_INDEX, flag)
@@ -87,72 +120,76 @@ def probe_backend(name: str, flag: int) -> dict:
         entry["opened"] = False
         print(f"[{name}] open failed")
         return entry
-    entry["opened"] = True
-    entry["default_props"] = read_props(cap)
+    try:
+        entry["opened"] = True
+        entry["default_props"] = read_props(cap)
 
-    # ウォームアップ + 実フレーム shape
-    frame = None
-    for _ in range(WARMUP + 1):
-        ok, f = cap.read()
-        if ok and f is not None:
-            frame = f
-    if frame is None:
-        entry["actual_frame_shape_HWC"] = None
-        entry["note"] = "opened but read() returned no frame"
-        cap.release()
-        print(f"[{name}] opened but no frame")
+        # ウォームアップ: 固定枚数ではなく「実フィード到達」を待つ（realtime/camera.py の
+        # WebcamSource._wait_until_live と同じ判定方式・config.LIVE_WAIT_TIMEOUT_S /
+        # config.LIVE_DIFF_STD_TH を流用）。EOS Webcam Utility の cold-start は実測 ~3.3s
+        # あり、固定枚数の warmup では起動直後のプレースホルダを掴む恐れがあるため。
+        frame, live_confirmed = _wait_until_live(cap, config.LIVE_WAIT_TIMEOUT_S)
+        if frame is None:
+            entry["actual_frame_shape_HWC"] = None
+            entry["note"] = "opened but read() returned no frame"
+            print(f"[{name}] opened but no frame")
+            return entry
+        if not live_confirmed:
+            entry["note"] = ("実フィードを確認できません（timeout）。"
+                              "以降の計測はプレースホルダの可能性があるフレームに基づきます")
+            print(f"[{name}] warning: live feed not confirmed within timeout")
+        entry["actual_frame_shape_HWC"] = list(frame.shape)  # (H, W, C)
+        entry["dtype"] = str(frame.dtype)
+
+        # 実効 fps（default/native モードで計測）
+        t0 = time.perf_counter()
+        n = 0
+        for _ in range(FPS_FRAMES):
+            ok, _f = cap.read()
+            if ok:
+                n += 1
+        dt = time.perf_counter() - t0
+        entry["effective_fps"] = (n / dt) if dt > 0 else None
+        entry["fps_frames_read"] = n
+
+        # 色特性 + サンプル保存（PNG は可逆(lossless)。JPEG だと追加で圧縮/サブサンプリングが乗るため）
+        entry["color"] = analyze_color(frame)
+        cv2.imwrite(str(CAPTURE_DIR / f"sample_{name}.png"), frame)
+
+        # WB 安定性（連続フレームの R/B mean の時間変動。WB 固定の効きを見る）
+        rb_means = []
+        for _ in range(60):
+            ok, f = cap.read()
+            if ok and f is not None:
+                b2, g2, r2 = cv2.split(f)
+                rb_means.append([float(r2.mean()), float(b2.mean())])
+        if len(rb_means) > 1:
+            arr = np.array(rb_means)
+            entry["wb_stability"] = {
+                "R_mean_std_over_time": float(arr[:, 0].std()),
+                "B_mean_std_over_time": float(arr[:, 1].std()),
+                "frames": len(rb_means),
+            }
+
+        # 解像度モード探索（set → read-back。set が成功を返しても実際は変わらないことがある）
+        modes = []
+        for (w, h) in PROBE_MODES:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            ok, f = cap.read()
+            got = [int(f.shape[1]), int(f.shape[0])] if (ok and f is not None) else None  # [W, H]
+            modes.append({
+                "requested_WH": [w, h],
+                "got_WH": got,
+                "fourcc": fourcc_to_str(cap.get(cv2.CAP_PROP_FOURCC)),
+            })
+        entry["resolution_modes"] = modes
+
+        print(f"[{name}] done: shape={entry['actual_frame_shape_HWC']} "
+              f"fps~={entry.get('effective_fps')}")
         return entry
-    entry["actual_frame_shape_HWC"] = list(frame.shape)  # (H, W, C)
-    entry["dtype"] = str(frame.dtype)
-
-    # 実効 fps（default/native モードで計測）
-    t0 = time.perf_counter()
-    n = 0
-    for _ in range(FPS_FRAMES):
-        ok, _f = cap.read()
-        if ok:
-            n += 1
-    dt = time.perf_counter() - t0
-    entry["effective_fps"] = (n / dt) if dt > 0 else None
-    entry["fps_frames_read"] = n
-
-    # 色特性 + サンプル保存（PNG 無圧縮。JPEG だと追加で圧縮/サブサンプリングが乗るため）
-    entry["color"] = analyze_color(frame)
-    cv2.imwrite(str(CAPTURE_DIR / f"sample_{name}.png"), frame)
-
-    # WB 安定性（連続フレームの R/B mean の時間変動。WB 固定の効きを見る）
-    rb_means = []
-    for _ in range(60):
-        ok, f = cap.read()
-        if ok and f is not None:
-            b2, g2, r2 = cv2.split(f)
-            rb_means.append([float(r2.mean()), float(b2.mean())])
-    if len(rb_means) > 1:
-        arr = np.array(rb_means)
-        entry["wb_stability"] = {
-            "R_mean_std_over_time": float(arr[:, 0].std()),
-            "B_mean_std_over_time": float(arr[:, 1].std()),
-            "frames": len(rb_means),
-        }
-
-    # 解像度モード探索（set → read-back。set が成功を返しても実際は変わらないことがある）
-    modes = []
-    for (w, h) in PROBE_MODES:
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-        ok, f = cap.read()
-        got = [int(f.shape[1]), int(f.shape[0])] if (ok and f is not None) else None  # [W, H]
-        modes.append({
-            "requested_WH": [w, h],
-            "got_WH": got,
-            "fourcc": fourcc_to_str(cap.get(cv2.CAP_PROP_FOURCC)),
-        })
-    entry["resolution_modes"] = modes
-
-    cap.release()
-    print(f"[{name}] done: shape={entry['actual_frame_shape_HWC']} "
-          f"fps~={entry.get('effective_fps')}")
-    return entry
+    finally:
+        cap.release()
 
 
 def main():
