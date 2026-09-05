@@ -12,8 +12,12 @@
 スレッドモデル（§7.2）: 取得スレッドが source.read() を回し、最新フレームを Lock 保護の
 単一スロットへ「上書き」する（キューに溜めない）。計算ループ（メインスレッド）はスロットから
 最新フレームのみを消費し、間に合わなかった中間フレームは自然に破棄される（遅延が蓄積しない）。
-Phase C では計算（ZNCC ~14s/frame）がカメラ(30fps)より遥かに遅く、計算が取得を追い越す
-状況は設計上起きないため、同期は Lock のみで足りる（新フレーム待ちの Condition は不要）。
+同期は Lock のみで足りる（新フレーム待ちの Condition は不要）。Phase C（Python 実装・
+ZNCC ~14s/frame）では計算がカメラ(30fps)より遥かに遅く、計算が取得を追い越す状況は設計上
+起きなかった。Phase D で Rust 化した現在は process_frame が ~12ms/frame（§9.1 のベンチ実測）
+で、カメラ側の ~33ms より速いため「新フレームがまだ無い」側が定常になる。この場合は
+frame_id 一致で空回りを検出し 1ms sleep して待つ（下の計算ループ参照）ので、いずれの
+速度関係でも Lock のみで正しく動く。
 
 gate2（Z レンジ 0<z<50000）はここ（表示側）で vmin/vmax として適用し、process_frame が
 返す depth マップは書き換えない（書き換えると evaluate.py の depth マップとビット一致しなく
@@ -27,9 +31,9 @@ realtime/ は core ではない（config import・I/O・cv2・threading を持�
 計算の中核は持たず pipeline.process_frame（→ core 純関数）を呼ぶだけ。
 入力検証は raise（assert は -O で無効化されるため使わない・リスク#10）。
 
-注: 計算が1フレーム ~14s（Phase C）の間、cv2 ウィンドウのイベント処理（waitKey）は
-    走らないためウィンドウは一時的に固まる（最初の表示も初回処理後＝起動から ~14s 後）。
-    これは Phase C の既知挙動で、Phase D で 30fps 化すれば解消する。
+注: cv2 ウィンドウのイベント処理（waitKey）は1フレームの計算が終わるまで走らない。
+    Phase C（Python 実装・~14s/frame）ではウィンドウが数秒間固まり、最初の表示も起動から
+    ~14s 後だった。Phase D の Rust 実装（~12ms/frame）ではこの体感は解消している。
 
 §9.2 のクリップ再生「再現一致」検証（録った raw を1フレームずつ決定的に再生してライブ depth と
 一致を確認）は、フレームを間引かない別ドライバの役割（連番PNG再生 source の camera.py 追加と
@@ -368,6 +372,15 @@ def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     # 連番が 000000 から上書きされ新旧フレームが混在した「キメラセッション」になり、
     # verify_clip_replay の自己整合チェックでは検出できない（2026-07 レビューで確認）ため、
     # 録画開始前（フレーム取得前）に raise で止める。空ディレクトリは許可する。
+    # session は無検証で Path 結合すると `..` や絶対パスで captures/outputs の外へ書けてしまう。
+    # 単一のディレクトリ名だけを許可する（2026-09 レビュー）。
+    # 注: Windows の pathlib では Path("..").name == ".." となり name 比較だけでは弾けないため、
+    # カレント/親ディレクトリ参照は明示的に除外する（2026-09 レビューの回帰テストで検出）。
+    if not session or session in {".", ".."} or Path(session).name != session:
+        raise ValueError(
+            f"セッション名が不正です: {session!r}。パス区切り・親ディレクトリ参照(..)・"
+            f"絶対パスを含まない単一のディレクトリ名を指定してください")
+
     captures = Path(config.CAPTURES_DIR) / session
     outputs = Path(config.OUTPUTS_DIR) / session
     for d in (captures, outputs):
@@ -429,13 +442,18 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
 
 
 def _draw_hud(img: np.ndarray, *, fps: float | None, ms: float, valid: int, frame_id: int) -> None:
-    """表示画像へ FPS / ms / 有効画素数 / frame_id をオーバレイ（ASCII のみ・in-place）。
+    """表示画像へ cFPS / ms / 有効画素数 / frame_id をオーバレイ（ASCII のみ・in-place）。
 
     黒の太線 + 白の細線で、背景色に依らず読めるようにする。HUD は表示専用画像にのみ描き、
     保存する viz（クリーン）には描かない。
+
+    表記が `cFPS`（compute FPS）なのは、この値が preprocess + process_frame 区間だけの
+    所要時間 dt の逆数の EMA であり、入力待ち・表示・同期保存・GUI を含まないため
+    （2026-09 レビュー）。実効的な更新レートや録画スループット（E2E throughput）ではない。
+    入力が ~30fps でも計算が ~12ms なら cFPS は ~80 と表示される。
     """
     fps_txt = f"{fps:.2f}" if fps is not None else "n/a"
-    lines = [f"FPS: {fps_txt}  ms/frame: {ms:.0f}", f"valid: {valid}  id: {frame_id}"]
+    lines = [f"cFPS: {fps_txt}  ms/frame: {ms:.0f}", f"valid: {valid}  id: {frame_id}"]
     for i, text in enumerate(lines):
         y = 22 + i * 22
         cv2.putText(img, text, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)

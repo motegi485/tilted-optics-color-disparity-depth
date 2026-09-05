@@ -43,6 +43,12 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
     """live(保存 npy)と recomputed(png から再計算)を NaN 位置＋有限値で厳密比較する。"""
     if live.shape != recomputed.shape:
         return False, f"shape 不一致: live={live.shape}, recomputed={recomputed.shape}"
+    # np.array_equal は dtype 差を無視して数値等値なら True を返す。canonical な depth は
+    # float32（NaN 保持）と定められているので、dtype 一致自体を合否条件に含める
+    # （float64 で保存された npy を「ビット一致」と呼ばないため・2026-09 レビュー）。
+    if live.dtype != np.float32 or recomputed.dtype != np.float32:
+        return False, (f"dtype 不一致: live={live.dtype}, recomputed={recomputed.dtype}"
+                       f"（canonical は float32）")
     nan_live = np.isnan(live)
     nan_re = np.isnan(recomputed)
     if not np.array_equal(nan_live, nan_re):
@@ -62,7 +68,7 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
 
 def main(argv: list[str] | None = None) -> int:
     # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
-    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    # UTF-8 に固定する（realtime/runner.py の main() 冒頭と同じ対処）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")

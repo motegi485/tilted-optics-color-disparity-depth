@@ -124,6 +124,35 @@ def test_ensure_session_dirs_existing_nonempty_raises_and_preserves_content(tmp_
     assert list(existing.iterdir()) == [marker]
 
 
+@pytest.mark.parametrize("bad_session", ["..", "a/b", "a\\b", ""])
+def test_ensure_session_dirs_rejects_unsafe_name(bad_session, tmp_path, monkeypatch):
+    """`..`・区切り文字混入・空文字は単一ディレクトリ名でないため raise（2026-09 レビュー）。"""
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+
+    with pytest.raises(ValueError):
+        _ensure_session_dirs(bad_session)
+
+
+def test_ensure_session_dirs_rejects_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+
+    with pytest.raises(ValueError):
+        _ensure_session_dirs(str(tmp_path))
+
+
+def test_ensure_session_dirs_normal_name_still_succeeds(tmp_path, monkeypatch):
+    """単一ディレクトリ名ガード追加後も、通常名では従来どおり成功すること。"""
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+
+    captures, outputs = _ensure_session_dirs("ok_session")
+
+    assert captures.is_dir()
+    assert outputs.is_dir()
+
+
 def test_ensure_session_dirs_existing_empty_dir_is_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
     monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
