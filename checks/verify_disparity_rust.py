@@ -1,7 +1,8 @@
 """checks/verify_disparity_rust.py — Phase D §5.6 受入基準1,2 の照合ゲート。
 
 core._disparity_reference（凍結 Python 参照実装）と _rt_disparity_native（Rust 実装）を
-同一入力で実行し、NaN 位置の完全一致・有限画素の max|Δd| <= 1e-4px を検証する。
+同一入力で実行し、NaN 位置の完全一致と視差値の一致（§5.6 受入基準2・2026-09-05 改定の
+主基準 max|Δd| <= 1e-3px ＋ 副基準「|Δd| > 1e-4px の画素率 <= 0.05%」）を検証する。
 あわせて Rust の sequential(parallel=False) vs parallel(True) の決定論一致も確認する
 （rayon 並列化がデータ競合なく同じ結果を返すことの根拠）。
 
@@ -9,15 +10,18 @@ core._disparity_reference（凍結 Python 参照実装）と _rt_disparity_nativ
   - tests/test_core.py 由来の合成パターン（既知シフト・平坦blue）
   - 敵対的入力（全面平坦・templ側飽和隣接エッジ・周期縞・極小画像・縮退パラメータ・
     閾値で全画素除外）
-  - data/test/*.jpg・data/captures/*/ の実写コーパス（存在すれば。現状は空でもFAILにはせず
-    「実行できなかった」ことを明示する＝§5.6基準1-3はデータ復元後に別途確認が必要）
+  - data/test/*.jpg・data/captures/*/ の実写コーパス（§5.6 基準1-3。既定では0件を exit 2 と
+    して受入不成立にする。実データを持たない開発機では --allow-synthetic-only を明示する）
 
 実行: uv run python -m checks.verify_disparity_rust
+      uv run python -m checks.verify_disparity_rust --allow-synthetic-only   # 実データ無し環境
 """
 # --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import argparse
 
 import cv2
 import numpy as np
@@ -34,7 +38,17 @@ except ImportError as e:
     sys.exit(2)
 
 K, S, TH = config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH
-MAX_DELTA_TOL = 1e-4  # px（§5.6 受入基準2・確定）
+
+# §5.6 受入基準2【2026-09-05 改定】。Rust は ZNCC を f64 で除算して f32 化し、OpenCV
+# matchTemplate は f32 で計算するため両者は概ね 1 ULP 差になる。サブピクセル項
+# (sim_pos - sim_neg) / (4*sim_peak - 2*sim_neg - 2*sim_pos) はこの差を分母の逆数倍に
+# 増幅し、ピークが平坦（分母→0）な画素では増幅率に上限が無い。したがって単一の
+# max|Δd| 閾値では余裕を保証できない（実測: 分母 0.00279 の画素で |Δd|=1.049e-4px）。
+# 主基準で外れ値の大きさを、副基準でその発生率を抑える二段構成にする。
+MAX_DELTA_TOL = 1e-3        # px。主基準（実測最大 1.049e-4px に対し約9.5倍の余裕）
+FINE_DELTA_TOL = 1e-4       # px。副基準が数える「粗い差分」の下限
+OVER_FINE_RATE_MAX = 5e-4   # 副基準: |Δd|>FINE_DELTA_TOL の画素率上限 0.05%
+                            # （fixture 単位。実測最悪 1/12,299=0.0081% に対し約6倍の余裕）
 
 
 def calc_rust(red, blue, k, s, th, parallel):
@@ -120,7 +134,7 @@ def real_corpus_fixtures():
 
     captures は各セッションの先頭1フレームのみのサンプリング照合（Python 参照実装が
     ≈数秒〜数十秒/frame かかるため）。クリップ全フレームの再現一致は、タイ→NaN 化（C-1）
-    以後に再録画したセッションに対する checks/verify_clip_replay.py の役割（§9.3）。
+    以後に再録画したセッションに対する checks/verify_clip_replay.py の役割（§9.2）。
     """
     fx = []
     for path in sorted(config.TEST_DIR.glob("*.jpg")):
@@ -162,45 +176,76 @@ def compare_one(red, blue, k, s, th):
         d_rust_par[~nan_par], d_rust_seq[~nan_seq])
 
     both_finite = ~nan_py & ~nan_par
-    if np.any(both_finite):
+    n_compared = int(np.count_nonzero(both_finite))
+    if n_compared:
         delta = np.abs(d_py[both_finite].astype(np.float64)
                         - d_rust_par[both_finite].astype(np.float64))
         max_delta = float(np.max(delta))
+        n_over_fine = int(np.count_nonzero(delta > FINE_DELTA_TOL))
+        over_fine_rate = n_over_fine / n_compared
     else:
         max_delta = 0.0
+        n_over_fine = 0
+        over_fine_rate = 0.0
 
     return {
         "nan_match": bool(nan_match),
         "n_nan_mismatch": int(np.sum(nan_py != nan_par)),
         "max_delta": max_delta,
+        "n_over_fine": n_over_fine,
+        "over_fine_rate": over_fine_rate,
         "determinism_match": bool(determinism_match),
         "n_valid_py": int(np.sum(~nan_py)),
-        "dtype_ok": d_rust_par.dtype == np.float32,
+        "dtype_ok": (d_py.dtype == np.float32) and (d_rust_par.dtype == np.float32),
         "writable_ok": d_rust_par.flags.writeable,
     }
 
 
-def _passes(r):
-    return (r["nan_match"] and r["max_delta"] <= MAX_DELTA_TOL
+def _requires_valid(name):
+    """有効視差が1画素も出ないこと自体が異常な fixture か。
+
+    既知シフト（正解の視差が存在する合成入力）と実写コーパスは、両実装が揃って全 NaN を
+    返しても「NaN 位置一致・max|Δd|=0」で合格してしまう。相互一致は共通退行を検出できない
+    ため、これらだけは有効画素数>0 を独立した合格条件として課す（2026-09 レビュー）。
+    全面平坦など「全 NaN が正解」の縮退 fixture は対象外。
+    """
+    return name.startswith(("known_shift_", "test/", "captures/"))
+
+
+def _passes(r, name=""):
+    if _requires_valid(name) and r["n_valid_py"] <= 0:
+        return False
+    return (r["nan_match"]
+            and r["max_delta"] <= MAX_DELTA_TOL              # 主基準
+            and r["over_fine_rate"] <= OVER_FINE_RATE_MAX    # 副基準
             and r["determinism_match"] and r["dtype_ok"] and r["writable_ok"])
 
 
-def main():
+def main(argv: list[str] | None = None):
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
 
+    parser = argparse.ArgumentParser(
+        description="§5.6 受入基準1,2 の Rust↔Python 照合ゲート")
+    parser.add_argument("--allow-synthetic-only", action="store_true",
+                        help="実写コーパスが0件でも受入不成立(exit 2)にしない。実データを持たない"
+                             "開発機での動作確認用。§5.6 基準1-3 は未検証のまま残る")
+    args = parser.parse_args(argv)
+
     print(f"_rt_disparity_native.__version__ = {native.__version__}")
+    print(f"受入基準2（§5.6・2026-09-05 改定）: 主 max|Δd| <= {MAX_DELTA_TOL:.0e}px / "
+          f"副 |Δd|>{FINE_DELTA_TOL:.0e}px の画素率 <= {OVER_FINE_RATE_MAX * 100:.2f}%")
 
     synth_fx = synthetic_fixtures()
     real_fx = real_corpus_fixtures()
     print(f"合成・敵対的フィクスチャ: {len(synth_fx)}件  実写コーパス: {len(real_fx)}件")
-    if not real_fx:
+    if not real_fx and args.allow_synthetic_only:
         print("[NOTE] data/test・data/captures が空のため実写コーパス照合はスキップ"
-              "（§5.6 受入基準1-3はデータ復元後に別途 `uv run python -m checks.verify_disparity_rust` "
-              "を再実行して確認すること）")
+              "（--allow-synthetic-only 指定。§5.6 受入基準1-3 はデータ復元後に "
+              "`uv run python -m checks.verify_disparity_rust` を再実行して確認すること）")
 
     results = []
     for name, red, blue, k, s, th in synth_fx + real_fx:
@@ -209,16 +254,18 @@ def main():
         except Exception as e:
             print(f"[ERROR] {name}: {e!r}")
             results.append((name, {"nan_match": False, "n_nan_mismatch": -1, "max_delta": float("inf"),
+                                    "n_over_fine": -1, "over_fine_rate": float("inf"),
                                     "determinism_match": False, "n_valid_py": -1,
                                     "dtype_ok": False, "writable_ok": False}))
             continue
         results.append((name, r))
-        status = "OK" if _passes(r) else "FAIL"
+        status = "OK" if _passes(r, name) else "FAIL"
         print(f"[{status}] {name}: nan_match={r['nan_match']} n_mismatch={r['n_nan_mismatch']} "
-              f"max|Δd|={r['max_delta']:.3e} determinism={r['determinism_match']} "
+              f"max|Δd|={r['max_delta']:.3e} over1e-4={r['n_over_fine']}"
+              f"({r['over_fine_rate'] * 100:.4f}%) determinism={r['determinism_match']} "
               f"n_valid={r['n_valid_py']}")
 
-    fail = [(name, r) for name, r in results if not _passes(r)]
+    fail = [(name, r) for name, r in results if not _passes(r, name)]
     print(f"\n{len(results) - len(fail)}/{len(results)} PASS")
 
     # 契約チェック（native 単体の防御動作。ラッパー core/disparity.py の契約は
@@ -256,17 +303,25 @@ def main():
     if not contract_failures:
         print("契約チェック: OK（ValueError 3種・空画像 panic なし）")
 
-    if not real_fx:
-        # 実写コーパスが無いこと自体は FAIL 条件にしない（ユーザー指示により実装優先で進行中のため）が、
-        # 明示的に「未検証」であることを最終行に残す。
-        print("[PARTIAL] 合成・敵対的入力での正当性検証は完了。実写コーパス(§5.6基準1-3)は未検証。")
-
     if fail or contract_failures:
         print(f"[FAIL] 不一致 {len(fail)}件: {[name for name, _ in fail]} / "
               f"契約チェック失敗 {len(contract_failures)}件")
         return 1
-    print("PASS: 全フィクスチャで Rust版とPython参照版が§5.6基準(NaN一致・|Δd|<=1e-4px)を満たし、"
-          "並列/逐次の決定論も確認できた")
+
+    if not real_fx:
+        # 実写コーパス0件は「合格」ではなく「受入不成立」。合成onlyの成功と §5.6 の受入完了を
+        # 終了コードで機械的に弁別できるようにする（2026-09 レビュー。旧実装はここで PASS/exit 0
+        # を返していたため、実写検証の欠落を自動化から検知できなかった）。
+        print("[PARTIAL] 合成・敵対的入力での正当性検証は完了。実写コーパス(§5.6基準1-3)は未検証。")
+        if not args.allow_synthetic_only:
+            print("[ERROR] 実写コーパスが0件です。data/test・data/captures を復元してから"
+                  "再実行してください（意図的に合成のみで確認する場合は "
+                  "--allow-synthetic-only を指定）")
+            return 2
+        return 0
+
+    print(f"PASS: 全フィクスチャ（実写{len(real_fx)}件を含む）で Rust版とPython参照版が"
+          f"§5.6 受入基準1,2 を満たし、並列/逐次の決定論も確認できた")
     return 0
 
 
