@@ -99,7 +99,7 @@ def _resolve_disparity_fn(impl: str):
 
 def main(argv: list[str] | None = None) -> int:
     # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
-    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    # UTF-8 に固定する（realtime/runner.py の main() 冒頭と同じ対処）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -114,6 +114,12 @@ def main(argv: list[str] | None = None) -> int:
                          help="native=core.disparity（Rust 実装への薄いラッパー） / "
                               "python=core._disparity_reference（既定native）")
     args = parser.parse_args(argv)
+
+    # n<=0 だと _bench の times が空になり np.min([]) が ValueError を送出する（計測0件を
+    # 「成功」とも「失敗」とも言えないため、入力不備として exit 2 で早期に止める）。
+    if args.n < 1:
+        print(f"[ERROR] --n は 1 以上が必要です（渡された値: {args.n}）")
+        return 2
 
     if args.source == "synthetic":
         name, frame = _load_synthetic()
@@ -166,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         verdict_p = "PASS" if p95_p < budget_ms else "FAIL"
         print(f"[{verdict_d}] disparity単体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_d:.2f}ms")
         print(f"[{verdict_p}] process_frame全体: 30fps バジェット {budget_ms:.2f}ms に対し p95={p95_p:.2f}ms")
+        # §5.6 受入基準4（30fps）の機械的ゲートとして使えるよう、判定を終了コードへ接続する
+        # （stdout の FAIL を人間が読む前提だと自動化から見て常に成功になる）。
+        if verdict_d == "FAIL" or verdict_p == "FAIL":
+            return 1
+    # --impl python は Python 参照実装の速度比較が目的で 30fps 判定の対象外（常に 0）。
     return 0
 
 

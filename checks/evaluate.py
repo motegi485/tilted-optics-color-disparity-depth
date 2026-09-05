@@ -63,7 +63,7 @@ def evaluate(image_path: Path, params, gt_distance: int):
 
 def main() -> int:
     # Windows の日本語コンソール(cp932)は非対応文字の print で UnicodeEncodeError を出すため
-    # UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    # UTF-8 に固定する（realtime/runner.py の main() 冒頭と同じ対処）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -79,6 +79,7 @@ def main() -> int:
     expected_ci = {name.lower(): exp for name, exp in EXPECTED.items()}  # 拡張子の大小差を吸収
 
     all_pass = True
+    matched = 0        # EXPECTED と照合できた枚数。0 のまま終わると「空振り成功」になる
     for img_path in img_paths:
         gt = int(img_path.stem)            # ファイル名=正解距離[mm]
         mean_d, mode_d, mae, valid_size = evaluate(img_path, params, gt)
@@ -89,6 +90,7 @@ def main() -> int:
         if exp is None:
             print("  [INFO] 期待値未登録（EXPECTED に無いファイル）のため照合はスキップ")
             continue
+        matched += 1
 
         mean_ok = abs(mean_d - exp["mean"]) <= TOL_MM
         mae_ok = abs(mae - exp["mae"]) <= TOL_MM
@@ -101,6 +103,14 @@ def main() -> int:
             print(f"  [FAIL] 回帰アンカー不一致: 期待 平均={exp['mean']}mm "
                   f"(diff={mean_d - exp['mean']:+.4f}) MAE={exp['mae']}mm "
                   f"(diff={mae - exp['mae']:+.4f}) 有効画素数={exp['valid']}(実測={valid_size})")
+
+    # 回帰ゲートとして exit 0 を返してよいのは「アンカーを実際に照合して合格した」場合だけ。
+    # 数値名だが未登録の JPG しか無い状態を成功にすると、アンカー画像の消失を検知できない。
+    if matched == 0:
+        print(f"[ERROR] 回帰アンカーの照合が1件も行われませんでした"
+              f"（EXPECTED = {sorted(EXPECTED)}）。{config.TEST_DIR} に登録済みの"
+              f"アンカー画像を置いてから再実行してください")
+        return 2
 
     return 0 if all_pass else 1
 
