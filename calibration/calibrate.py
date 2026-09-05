@@ -1,7 +1,7 @@
 """
 calibration/calibrate.py
 
-校正画像（ファイル名 = 距離[mm].jpg）から符号付き視差を求め、符号別に per-pixel RANSAC で
+校正画像（ファイル名 = 距離[mm]。.png/.jpg/.jpeg。キャンペーン内での規格混在は下の入力ガードが拒否）から符号付き視差を求め、符号別に per-pixel RANSAC で
 直線 row = a·disparity + b をフィットし、各距離の zero_disp(=切片 b)・傾き a・
 インライヤ率・点数を params/params.csv に出力する。
 （先行研究の参考コードの calibration.py の per-pixel RANSAC 版を rt 構成で再現したもの）
@@ -9,7 +9,7 @@ calibration/calibrate.py
 パイプライン: 校正画像 → 視差(core/disparity) → 符号別の点群抽出 → RANSAC 直線フィット → params.csv
 後段の fit_params.py が params.csv を受け取り、参照式 y0 = v/z + u をフィットする。
 
-設計原則(v1.2 §4.1):
+設計原則(§4.1):
   - calibration/ は core ではない。config import・I/O・matplotlib 可。
     ただし視差計算は純関数 core.disparity を config 注入で呼ぶ(校正と推論の設定を一致させる)。
   - 無効値は np.nan(0 埋め禁止)。入力検証は raise(assert は -O で無効化されるため使わない)。
@@ -58,6 +58,15 @@ def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
     戻り値: a(傾き), b(切片=zero_disp=視差0のy座標), inlier_mask。
     コンセンサス不成立時は RANSACRegressor が ValueError を送出する。
     """
+    # 点数だけでは傾きの同定性を保証できない: d が全て同値だと設計行列 [d, 1] の階数が1に
+    # なり、a は非同定のまま任意の値が返りうる（RANSAC_MIN_POINTS は階数を保証しない）。
+    # 呼び出し側は ValueError を「コンセンサス不成立」と同じく NaN 行として扱う（2026-09 レビュー）。
+    n_unique = int(np.unique(d_vals).size)
+    if n_unique < 2:
+        raise ValueError(
+            f"視差の一意値が {n_unique} 個しかなく、直線の傾き a を同定できません"
+            f"（設計行列 [d, 1] の階数が1）")
+
     X = d_vals.reshape(-1, 1)                  # sklearn は特徴量を (N,1) の2次元で要求する
     est = RANSACRegressor(residual_threshold=residual_threshold,
                           random_state=random_state)
@@ -171,14 +180,14 @@ def main():
         try:
             a_pos, b_pos, mask_pos = ransac_fit_line(
                 d_pos, y_pos, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
-        except ValueError:
-            print("  pos: RANSAC コンセンサス不成立 → NaN")
+        except ValueError as e:
+            print(f"  pos: 直線フィット不成立 → NaN（{e}）")
             a_pos, b_pos, mask_pos = np.nan, np.nan, np.zeros(n_pos, dtype=bool)
         try:
             a_neg, b_neg, mask_neg = ransac_fit_line(
                 d_neg, y_neg, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
-        except ValueError:
-            print("  neg: RANSAC コンセンサス不成立 → NaN")
+        except ValueError as e:
+            print(f"  neg: 直線フィット不成立 → NaN（{e}）")
             a_neg, b_neg, mask_neg = np.nan, np.nan, np.zeros(n_neg, dtype=bool)
 
         # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値(§6.3)

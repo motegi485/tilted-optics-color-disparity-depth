@@ -80,6 +80,30 @@ def test_calibrate_rejects_bad_aspect_ratio(tmp_path, monkeypatch):
         calibrate.main()
 
 
+# ===== ransac_fit_line: 一意値ガード（2026-09 レビュー）と正常フィット =====
+
+def test_ransac_fit_line_single_unique_value_raises():
+    """d が全て同値だと設計行列 [d,1] の階数が1になり傾きを同定できないため raise。"""
+    d_vals = np.full(20, 2.0)
+    row_vals = np.arange(20, dtype=np.float64)
+    with pytest.raises(ValueError):
+        calibrate.ransac_fit_line(d_vals, row_vals, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
+
+
+def test_ransac_fit_line_fits_known_line():
+    """雑音なしの厳密な直線 row=a*d+b を与えると、a・b・inlier_mask がそれを再現する。"""
+    d_vals = np.linspace(1.0, 10.0, 40)
+    true_a, true_b = 5.0, 100.0
+    row_vals = true_a * d_vals + true_b
+
+    a, b, inlier_mask = calibrate.ransac_fit_line(
+        d_vals, row_vals, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
+
+    assert a == pytest.approx(true_a, abs=1e-6)
+    assert b == pytest.approx(true_b, abs=1e-6)
+    assert int(inlier_mask.sum()) == len(d_vals)
+
+
 # ===== fit_params.py C-2 isfinite フィルタ =====
 
 def test_filter_finite_keeps_negative_intercept_drops_nan():

@@ -83,7 +83,7 @@ def _fit_branch(depths, zero_disp, label):
 
 def main():
     # Windows の日本語コンソール(cp932)は「ā」等の非対応文字の print で UnicodeEncodeError を
-    # 出すため UTF-8 に固定する（runner.py:252-255 と同じ対処）。
+    # 出すため UTF-8 に固定する（realtime/runner.py の main() 冒頭と同じ対処）。
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -102,6 +102,24 @@ def main():
         raise ValueError(
             f"params.csv に必要な列がありません: {sorted(missing_cols)} "
             f"（{config.PARAMS_CSV_PATH}）")
+
+    # --- 入口チェック: depth 列の妥当性（2026-09 レビュー） ---
+    # 参照式 y0 = v/z + u は z>0 が前提（z=0 で v/z が発散し、負の距離は物理的に無意味）。
+    # 重複 depth は独立な観測点にならず、2 パラメータフィットの同定性を落とす。
+    # calibrate.py の正常出力なら常に満たされるが、手編集や別キャンペーンの連結を想定して
+    # ここで止める（fit は入力を trusted としない）。
+    depth_raw = pd.to_numeric(df["depth"], errors="coerce").values.astype(float)
+    if not np.all(np.isfinite(depth_raw)):
+        raise ValueError(
+            f"params.csv の depth に有限でない値があります（{config.PARAMS_CSV_PATH}）")
+    if np.any(depth_raw <= 0):
+        bad = sorted(float(d) for d in depth_raw[depth_raw <= 0])
+        raise ValueError(
+            f"params.csv の depth は正の距離[mm]である必要があります（不正値: {bad}）")
+    if np.unique(depth_raw).size != depth_raw.size:
+        raise ValueError(
+            f"params.csv に重複した depth があります（1距離1行が前提）: "
+            f"{config.PARAMS_CSV_PATH}")
 
     # --- フィッティング失敗行の除外（pos/neg を独立にフィルタ） ---
     # RANSAC コンセンサス不成立の行は calibrate.py が NaN を書く。isfinite でその行のみを除外する
@@ -130,6 +148,16 @@ def main():
 
     # --- 傾き ā の算出（フィルタ後サブセットの単純平均） ---
     # 各距離の直線フィットの傾き a を符号別に平均する。pos は a_pos 列、neg は a_neg 列を使う。
+    # 平均を取る前に有限性を確認する。NaN が1つ混ざるだけで ā は NaN になり、その符号枝の
+    # 推論結果が全画素 NaN になる（無音で全滅するため、ここで原因つきで止める）。
+    for label, sub in (("pos", df_pos), ("neg", df_neg)):
+        col = f"a_{label}"
+        vals = sub[col].values.astype(float)
+        if not np.all(np.isfinite(vals)):
+            raise ValueError(
+                f"params.csv の {col} に有限でない値があります（{label} 枝・"
+                f"該当 depth: {sorted(sub['depth'].values[~np.isfinite(vals)].tolist())}）")
+
     a_pos = float(np.mean(df_pos["a_pos"].values))
     a_neg = float(np.mean(df_neg["a_neg"].values))
     print(f"\nā_pos = {a_pos}")
@@ -141,6 +169,14 @@ def main():
         "v_pos": v_pos, "u_pos": u_pos, "w_pos": w_pos, "a_pos": a_pos,
         "v_neg": v_neg, "u_neg": u_neg, "w_neg": w_neg, "a_neg": a_neg,
     }
+    # 保存前の不変条件: 8係数すべて有限。curve_fit は収束しなくても例外を出さずに
+    # inf/nan を返しうるため、壊れた fit_result.csv を書き残さない。
+    non_finite = sorted(k for k, v in values.items() if not np.isfinite(v))
+    if non_finite:
+        raise ValueError(
+            f"フィット結果に有限でない係数があります: {non_finite}。"
+            f"校正入力（{config.PARAMS_CSV_PATH}）を確認してください")
+
     result = pd.DataFrame(
         {"param": PARAM_KEYS, "value": [values[k] for k in PARAM_KEYS]})
 

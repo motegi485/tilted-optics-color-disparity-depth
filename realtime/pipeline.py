@@ -16,9 +16,22 @@ from core.depth import compute_depth
 
 
 def process_frame(proc_bgr, params):
-    """proc_bgr: preprocess 済み (352,528,3) uint8 BGR -> depth_map(float32, NaN 伝播)。"""
-    if proc_bgr.ndim != 3 or proc_bgr.shape[2] != 3:
-        raise ValueError(f"process_frame: 3ch BGR を想定。実際は shape={proc_bgr.shape}")
+    """proc_bgr: preprocess 済み (352,528,3) uint8 BGR -> depth_map(float32, NaN 伝播)。
+
+    形状と dtype をここで強制する（2026-09 レビュー）。参照式の y は行番号そのものであり、
+    校正係数 v/u/ā は処理解像度 config.IMAGE_SIZE=(528,352) の y スケールに紐づく。別解像度の
+    配列を渡すと同じ物理位置の y が変わるのに同じ係数が適用され、無音で誤った距離を返す。
+    """
+    if not isinstance(proc_bgr, np.ndarray):
+        raise ValueError(f"process_frame: np.ndarray を想定。実際は {type(proc_bgr)!r}")
+    expected_shape = (config.IMAGE_SIZE[1], config.IMAGE_SIZE[0], 3)   # (H,W,C)=(352,528,3)
+    if proc_bgr.shape != expected_shape:
+        raise ValueError(
+            f"process_frame: 入力は {expected_shape} (H,W,C) を想定。"
+            f"実際は shape={proc_bgr.shape}（校正係数は処理解像度 {config.IMAGE_SIZE} 前提）")
+    if proc_bgr.dtype != np.uint8:
+        raise ValueError(
+            f"process_frame: 入力は uint8 を想定。実際は dtype={proc_bgr.dtype}")
 
     # 1) R/B チャンネル分割（シアン（G+B を透過）, イエロー（G+R を透過））
     blue, _, red = cv2.split(proc_bgr)

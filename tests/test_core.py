@@ -12,7 +12,7 @@ import pytest
 from core.disparity import calcDisparityByZNCC as calc_rust
 from core._disparity_reference import calcDisparityByZNCC as calc_python
 from core.depth import compute_depth
-from core.params import DepthParams
+from core.params import DepthParams, load_params
 
 
 K, S, TH = 17, 31, 30
@@ -199,3 +199,63 @@ def test_depthparams_from_dict_ok():
     assert params.v_pos == 1.5
     assert params.w_neg == 0.0
     assert isinstance(params.v_pos, float)
+
+
+# ===== DepthParams.from_dict: 係数の妥当性検証（2026-09 レビューで追加されたガード） =====
+
+@pytest.mark.parametrize("bad_key,bad_value", [
+    ("v_pos", "nan"), ("u_pos", "inf"), ("a_pos", "-inf"),
+    ("v_neg", "nan"), ("a_neg", "inf"),
+])
+def test_depthparams_from_dict_non_finite_coefficient_raises(bad_key, bad_value):
+    mapping = {"v_pos": "1", "u_pos": "1", "a_pos": "1", "w_pos": "0",
+               "v_neg": "1", "u_neg": "1", "a_neg": "1", "w_neg": "0"}
+    mapping[bad_key] = bad_value
+    with pytest.raises(ValueError):
+        DepthParams.from_dict(mapping)
+
+
+@pytest.mark.parametrize("bad_key", ["w_pos", "w_neg"])
+def test_depthparams_from_dict_nonzero_w_raises(bad_key):
+    mapping = {"v_pos": "1", "u_pos": "1", "a_pos": "1", "w_pos": "0",
+               "v_neg": "1", "u_neg": "1", "a_neg": "1", "w_neg": "0"}
+    mapping[bad_key] = "1.0"
+    with pytest.raises(ValueError):
+        DepthParams.from_dict(mapping)
+
+
+def test_depthparams_from_dict_all_finite_w_zero_succeeds_as_float():
+    mapping = {"v_pos": "1.0", "u_pos": "2.0", "a_pos": "3.0", "w_pos": "0.0",
+               "v_neg": "4.0", "u_neg": "5.0", "a_neg": "6.0", "w_neg": "0.0"}
+    params = DepthParams.from_dict(mapping)
+    for value in (params.v_pos, params.u_pos, params.a_pos, params.w_pos,
+                  params.v_neg, params.u_neg, params.a_neg, params.w_neg):
+        assert isinstance(value, float)
+
+
+# ===== load_params（tmp_path に自作 CSV。実 params/ ファイルには触れない） =====
+
+def _write_fit_csv(path, overrides=None) -> None:
+    values = {"v_pos": "1.0", "u_pos": "2.0", "a_pos": "3.0", "w_pos": "0.0",
+              "v_neg": "4.0", "u_neg": "5.0", "a_neg": "6.0", "w_neg": "0.0"}
+    if overrides:
+        values.update(overrides)
+    lines = ["param,value"] + [f"{k},{v}" for k, v in values.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_load_params_duplicate_param_raises(tmp_path):
+    path = tmp_path / "fit_result.csv"
+    lines = ["param,value", "v_pos,1.0", "v_pos,2.0", "u_pos,1.0", "a_pos,1.0", "w_pos,0.0",
+             "v_neg,1.0", "u_neg,1.0", "a_neg,1.0", "w_neg,0.0"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_params(path)
+
+
+def test_load_params_ok(tmp_path):
+    path = tmp_path / "fit_result.csv"
+    _write_fit_csv(path)
+    params = load_params(path)
+    assert params.v_pos == 1.0
+    assert params.w_neg == 0.0

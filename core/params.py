@@ -5,6 +5,7 @@ core/ は本来 I/O を持たない純関数の場所だが、params.py は「pa
 要件定義書 §5.3 で I/O を許可された例外（pandas/pathlib に依存してよい唯一の core ファイル）。
 """
 from dataclasses import dataclass
+import math
 import pandas as pd
 from pathlib import Path
 
@@ -33,26 +34,47 @@ class DepthParams:
 
         必要キーの欠損は KeyError。余分なキー（将来の生成条件メタデータ等）は無視する。
         値は float() で native float に正規化する（pandas 由来の numpy.float64 を core に持ち込まないため）。
+
+        値の妥当性は ValueError で拒否する（入力検証は raise・assert は -O で無効化されるため
+        使わない・§4.1 リスク#10）。ここがシステム境界の唯一の検証点であり、通過後は
+        compute_depth が無検査で使う:
+          - 8係数すべてが有限。NaN/inf の係数は同符号枝の全有効画素を無音で NaN/inf にするため、
+            推論に入る前に止める。
+          - w_pos == w_neg == 0。w=0 固定は要件書 §2.4 の理論的根拠に基づく設計判断であり、
+            CSV の手編集や旧実験ファイルで 0 以外が紛れ込むと全画素に一律オフセットが乗る。
         """
-        required = {
+        required = (
             "v_pos", "u_pos", "a_pos", "w_pos",
             "v_neg", "u_neg", "a_neg", "w_neg",
-        }
-        missing = required - set(mapping)
+        )
+        missing = set(required) - set(mapping)
         if missing:
             raise KeyError(
                 f"params に必要なキーが不足しています: {sorted(missing)}"
             )
-        return cls(
-            v_pos=float(mapping["v_pos"]),
-            u_pos=float(mapping["u_pos"]),
-            a_pos=float(mapping["a_pos"]),
-            w_pos=float(mapping["w_pos"]),
-            v_neg=float(mapping["v_neg"]),
-            u_neg=float(mapping["u_neg"]),
-            a_neg=float(mapping["a_neg"]),
-            w_neg=float(mapping["w_neg"]),
-        )
+
+        values = {}
+        for key in required:
+            try:
+                values[key] = float(mapping[key])
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"params の {key} を float に変換できません（値: {mapping[key]!r}）"
+                ) from e
+
+        non_finite = [k for k in required if not math.isfinite(values[k])]
+        if non_finite:
+            detail = ", ".join(f"{k}={values[k]!r}" for k in non_finite)
+            raise ValueError(f"params の係数が有限ではありません: {detail}")
+
+        nonzero_w = [k for k in ("w_pos", "w_neg") if values[k] != 0.0]
+        if nonzero_w:
+            detail = ", ".join(f"{k}={values[k]!r}" for k in nonzero_w)
+            raise ValueError(
+                f"w は 0 固定です（要件書 §2.4）。0 以外の値が指定されています: {detail}"
+            )
+
+        return cls(**values)
 
 
 def load_params(path: str | Path) -> DepthParams:
@@ -72,6 +94,14 @@ def load_params(path: str | Path) -> DepthParams:
     if "param" not in fit_df.columns or "value" not in fit_df.columns:
         raise ValueError(
             f"params ファイルに 'param' 列と 'value' 列が必要です: {fit_path}"
+        )
+
+    # set_index(...).to_dict() は同名 param を「後勝ち」で黙って潰す。異なる値の v_pos が
+    # 2行並んでいても後の行だけが採用され、CSV を目視しない限り気づけないため先に検出する。
+    duplicated = sorted(set(fit_df["param"][fit_df["param"].duplicated()]))
+    if duplicated:
+        raise ValueError(
+            f"params ファイルに重複した param があります: {duplicated}（{fit_path}）"
         )
 
     # pandas 依存はこの 1 行で完結させ、from_dict には素の dict だけを渡す
