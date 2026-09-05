@@ -88,7 +88,6 @@ fn compute_disparity_row(
     out_row: &mut [f32],
     edge_red: &[u8],
     edge_blue: &[u8],
-    h: usize,
     w: usize,
     kernel_size: usize,
     search_range_x: usize,
@@ -99,7 +98,6 @@ fn compute_disparity_row(
     x_end: isize,
 ) {
     debug_assert_eq!(out_row.len(), w);
-    let _ = h;
     if x_end <= x_start {
         return; // 有効な x 範囲なし（全 NaN のまま）
     }
@@ -244,7 +242,6 @@ fn calc_disparity_impl(
             out_row,
             &edge_red,
             &edge_blue,
-            h,
             w,
             kernel_size,
             search_range_x,

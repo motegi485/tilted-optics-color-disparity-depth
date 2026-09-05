@@ -11,7 +11,8 @@ crate-type = ["cdylib"]
 [dependencies]
 # Python連携の標準バインディング（Phase 0 スパイクで Python 3.14 + maturin 1.14 との組合せを実機確認済み）
 pyo3 = { version = "0.27", features = ["extension-module"] }
-# numpy配列とのゼロコピー連携（PyReadonlyArray2 / PyArray2）
+# numpy配列との連携（PyReadonlyArray2 / PyArray2）。入力は GIL 保持中に所有 Vec へコピーして
+# から GIL を解放する（lib.rs の calc_disparity_by_zncc 参照）。ゼロコピーではない
 numpy = "0.27"
 # 行単位のデータ並列化（Phase 3 で使用。rayon はデータレース安全性をコンパイル時に保証する事実上の標準クレート）
 rayon = "1"
