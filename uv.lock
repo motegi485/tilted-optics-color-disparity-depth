@@ -355,7 +355,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rt-tilted-dfd-system"
+name = "tilted-optics-color-disparity-depth"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

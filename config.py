@@ -1,4 +1,4 @@
-"""rt-tilted-dfd-system 全体の定数・パスの一元管理。
+"""tilted-optics-color-disparity-depth 全体の定数・パスの一元管理。
 core/ はこれを import しない（純関数・引数注入）。値の注入は呼び出し側の責務。
 """
 from pathlib import Path

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""rt-tilted-dfd-system: runner.py --record-video で生成した
+"""tilted-optics-color-disparity-depth: runner.py --record-video で生成した
 video_raw.mp4 / video_depth.mp4 を、フレーム同期で「同時再生」する閲覧ツール。
 
 なぜ専用ツールが要るか:
@@ -62,7 +62,7 @@ EXPORT_FOURCC = "mp4v"
 EXPECTED_FPS = 30.0
 FPS_MISMATCH_TOL = 0.5  # 許容差（fps）。コンテナ側の丸め誤差程度は許容する
 
-WINDOW = "rt-tilted-dfd : raw | depth  (frame-locked)"
+WINDOW = "tilted-optics-color-disparity-depth : raw | depth  (frame-locked)"
 SPEEDS = [0.25, 0.5, 1.0, 2.0, 4.0]
 
 

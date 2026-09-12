@@ -1,5 +1,5 @@
 [project]
-name = "rt-tilted-dfd-system"
+name = "tilted-optics-color-disparity-depth"
 version = "0.1.0"
 description = "Real-time monocular depth estimation using tilted optics (Scheimpflug) and split color-filter aperture"
 readme = "README.md"

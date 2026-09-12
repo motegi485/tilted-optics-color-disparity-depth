@@ -469,7 +469,7 @@ def run(
     record_video: bool = False,
     colorbar: bool = True,
     session: str | None = None,
-    window_name: str = "rt-tilted-dfd",
+    window_name: str = "tilted-optics-color-disparity-depth",
     log_every: int = 30,
     params_path: str | None = None,
 ) -> None:
@@ -610,7 +610,7 @@ def main(argv: list[str] | None = None) -> None:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="rt-tilted-dfd リアルタイム実行（Phase C）")
+    parser = argparse.ArgumentParser(description="tilted-optics-color-disparity-depth リアルタイム実行（Phase C）")
     parser.add_argument("--source", choices=("webcam", "video", "still"), default="webcam")
     parser.add_argument("--path", default=None, help="video/still 用の入力パス")
     parser.add_argument("--params", default=str(config.PARAMS_PATH),
