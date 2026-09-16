@@ -12,6 +12,7 @@ TEST_DIR = DATA_DIR / "test"
 PARAMS_DIR = ROOT_DIR / "params"
 PARAMS_PATH = PARAMS_DIR / "fit_result.csv"
 CALIB_IMGS_DIR = DATA_DIR / "calib_imgs"                      # 校正画像（距離名.png/.jpg。キャンペーン内での規格混在は calibrate.py が拒否）
+CALIB_RAW_DIR = DATA_DIR / "calib_raw"                        # 校正撮影の raw（1280x720・バースト平均）。capture_calib --save-raw の保存先。処理解像度の実験用（2026-09-16）
 PARAMS_CSV_PATH = PARAMS_DIR / "params.csv"                   # calibrate.py の出力
 DIAG_CSV_PATH   = PARAMS_DIR / "calibration_diagnostics.csv" # 校正診断サマリ
 CAPTURES_DIR = DATA_DIR / "captures"     # raw 録画先（gitignore）

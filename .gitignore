@@ -26,6 +26,8 @@ CLAUDE.local.md
 # 実行時の生成物
 data/calib_imgs/*
 !data/calib_imgs/.gitkeep
+data/calib_raw/*
+!data/calib_raw/.gitkeep
 data/captures/*
 !data/captures/.gitkeep
 data/test/*

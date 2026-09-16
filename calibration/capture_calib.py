@@ -1,4 +1,4 @@
-"""calibration/capture_calib.py — FR-8 webcam 校正画像の取得（バースト平均 → preprocess → PNG）。
+"""calibration/capture_calib.py — FR-8 webcam 校正画像の取得（バースト平均 → preprocess → PNG。--save-raw で raw も保存）。
 
 校正パイプライン「取得 → calibrate → fit_params」の最初の工程。`data/calib_imgs/{距離}.png`
 を出力し、後段の `calibration.calibrate` → `calibration.fit_params` が live 推論 params
@@ -164,6 +164,33 @@ def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
     return True
 
 
+def save_calib_raw(raw_bgr: np.ndarray, dist: int, out_dir: Path, allow_overwrite: bool) -> bool:
+    """バースト平均の raw (720,1280,3) BGR を PNG（可逆）で out_dir/{dist}.png に保存する（--save-raw 用・2026-09-16）。
+
+    処理解像度（config.IMAGE_SIZE）を変える実験では、校正画像を別解像度で作り直す必要がある。
+    preprocess 前の raw を残しておけば、再撮影せずに `preprocess_to(raw, size)`（tools/analysis_common.py）で
+    任意の解像度の校正画像を再生成できる。保存前に shape=(720,1280,3)（WEBCAM_NATIVE_SIZE 整合）を検証する。
+    上書きの扱いは save_calib_png と同じ。
+    """
+    w, h = config.WEBCAM_NATIVE_SIZE
+    expected = (h, w, 3)
+    if raw_bgr.shape != expected or raw_bgr.dtype != np.uint8:
+        raise ValueError(
+            f"save_calib_raw: 保存対象は {expected} uint8 を想定。実際は {raw_bgr.shape} {raw_bgr.dtype}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{dist}.png"
+    if path.exists() and not allow_overwrite:
+        if not _ask_yes_no(f"  raw {path.name} は既に存在します。上書きしますか"):
+            print("  → raw の保存を中止しました。")
+            return False
+
+    if not cv2.imwrite(str(path), raw_bgr):
+        raise RuntimeError(f"save_calib_raw: PNG 書き込みに失敗しました: {path}")
+    print(f"  → raw を保存しました: {path}")
+    return True
+
+
 def run_subfunc_check(proc_bgr: np.ndarray) -> None:
     """保存した (528,352) で視差を試算し、撮影品質を即時に診断する（docs/module-calibration.md・任意）。
 
@@ -240,7 +267,7 @@ def _startup_guard() -> bool:
     return _ask_yes_no("このまま続行しますか")
 
 
-def _capture_one_distance(source: WebcamSource, dist: int, n: int) -> None:
+def _capture_one_distance(source: WebcamSource, dist: int, n: int, save_raw: bool = False) -> None:
     """1 距離分の撮影フロー: バースト → preprocess → 保存 → サブフィット(任意) → 撮り直し(任意)。
 
     撮り直し=n になるまでループする。撮り直し時は明示的上書きを許可する（docs/module-calibration.md）。
@@ -259,6 +286,8 @@ def _capture_one_distance(source: WebcamSource, dist: int, n: int) -> None:
 
         proc = preprocess(raw_avg)  # (1280,720) raw → (352,528,3)。平均後に1回だけ適用
         saved = save_calib_png(proc, dist, config.CALIB_IMGS_DIR, allow_overwrite=is_reshoot)
+        if saved and save_raw:      # 処理解像度の実験用に preprocess 前の raw も残す（--save-raw）
+            save_calib_raw(raw_avg, dist, config.CALIB_RAW_DIR, allow_overwrite=is_reshoot)
 
         if saved and _ask_yes_no(f"{dist}mm の撮影フレームをチェックしますか"):
             run_subfunc_check(proc)
@@ -269,7 +298,7 @@ def _capture_one_distance(source: WebcamSource, dist: int, n: int) -> None:
         return
 
 
-def run(n: int) -> None:
+def run(n: int, save_raw: bool = False) -> None:
     """対話ループ本体。webcam を起動時に1度だけ open し、全距離でその1接続を使い回す（docs/module-calibration.md）。"""
     if not _startup_guard():
         print("中止しました（散布ガード）。")
@@ -290,7 +319,7 @@ def run(n: int) -> None:
             if dist is None:
                 break
             try:
-                _capture_one_distance(source, dist, n)
+                _capture_one_distance(source, dist, n, save_raw=save_raw)
             except Exception as e:
                 # 1 距離分の処理で起きた例外（save_calib_png の imwrite 失敗 RuntimeError・
                 # cv2.error・ValueError 等）は、この距離だけスキップして原因を表示し、
@@ -317,12 +346,15 @@ def main() -> None:
         description="FR-8 webcam 校正画像の取得（バースト平均 → preprocess → PNG）")
     parser.add_argument("--n", type=int, default=DEFAULT_BURST_N,
                         help=f"バースト枚数（既定 {DEFAULT_BURST_N}）")
+    parser.add_argument("--save-raw", action="store_true",
+                        help=f"バースト平均の raw (1280x720) も {config.CALIB_RAW_DIR.name}/<距離>.png に保存する"
+                             "（処理解像度の実験用・2026-09-16）")
     args = parser.parse_args()
     if args.n < 1:
         raise ValueError(f"--n は 1 以上が必要です（渡された値: {args.n}）")
 
     try:
-        run(args.n)
+        run(args.n, save_raw=args.save_raw)
     except KeyboardInterrupt:
         # run() の finally で release 済み。メッセージのみ出して終了
         print("\n中断しました（Ctrl-C）。webcam は解放済みです。")
