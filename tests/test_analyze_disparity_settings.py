@@ -103,6 +103,11 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
         assert r["calib_ok"] == "True" and float(r["v_pos"]) == pytest.approx(TRUE.v_pos, rel=5e-3)
         assert float(r["mae_mean_mm_nogate"]) < 40.0 and float(r["px_used_stability"]) > 0
         assert r["mean_ms"] == ""                                            # --no-bench
+    with (out / "per_session.csv").open(encoding="utf-8", newline="") as f:
+        per = list(csv.DictReader(f))
+    assert list(per[0].keys()) == mod.PER_SESSION_COLUMNS
+    assert len(per) == 4 * 4 * 2                                             # 設定 4 × セッション 4 × ゲート 2
+    assert {r["gate"] for r in per} == {"nogate", "bandgate"} and all(float(r["mae_mm"]) < 60.0 for r in per)
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["band"] == [config.DISP_PLOT_LOW, config.DISP_PLOT_HEIGHT] and summary["bench_frame"] == ""
     assert main(["--sessions", "dist_1500", "--kernel-sizes", "8", "--calib-dir", str(tmp_path)]) == 2   # 偶数 K

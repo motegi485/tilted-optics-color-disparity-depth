@@ -8,7 +8,8 @@
 を 1 表にまとめる。判断（精度 vs 密度 vs 速度）はユーザー。
 
 出力（--out-dir、既定 outputs/analysis/disparity_settings_<日時>/）:
-  settings.csv（1 行＝1 設定）/ summary.json / mae_vs_kernel.png / mae_vs_edge.png（--no-plots で省略）
+  settings.csv（1 行＝1 設定）/ per_session.csv（設定 × セッション × 推論ゲートの距離別指標）/ summary.json /
+  mae_vs_kernel.png / mae_vs_edge.png（--no-plots で省略）
 
 実行例:
   uv run python -m tools.analyze_disparity_settings --manifest outputs\\distance_manifest.csv --skip-first 10 `
@@ -47,6 +48,8 @@ from tools.analysis_common import (
 from tools.analyze_disparity_stability import pixel_stats
 
 EVAL_KEYS = ["mae_mean_mm", "abs_bias_max_mm", "rmse_mean_mm", "valid_rate_mean"]
+PER_SESSION_COLUMNS = ["param", "value", "session", "gt_mm", "gate", "frames_used", "n_valid_total", "valid_rate",
+                       "mean_err_mm", "mae_mm", "rmse_mm", "median_err_mm"]
 COLUMNS = (["param", "value", "kernel_size", "search_range_x", "edge_th", "calib_ok", "error",
             "v_pos", "u_pos", "a_pos", "v_neg", "u_neg", "a_neg", "fit_rms_pos_px", "fit_rms_neg_px",
             "depth_rmse_mm", "inlier_pos_mean", "inlier_neg_mean", "n_skipped"]
@@ -94,7 +97,9 @@ def bench_setting(proc: np.ndarray, settings: DispSettings, n: int) -> dict:
 def run_setting(settings: DispSettings, param: str, value: float, *, calib_dir: Path,
                 targets: list[tuple[str, float]], cap_root: Path, skip_first: int, frames_per_session: int,
                 band: tuple[float, float], ransac_th: float | None, cache_root_dir: Path | None,
-                bench_proc: np.ndarray | None, bench_n: int) -> dict:
+                bench_proc: np.ndarray | None, bench_n: int) -> tuple[dict, list[dict]]:
+    """1 設定を処理して (要約 1 行, セッション別の行) を返す。セッション別は距離ごとのトレードオフを見るため。"""
+    per_rows: list[dict] = []
     row: dict = {"param": param, "value": value, "kernel_size": settings.kernel_size,
                  "search_range_x": settings.search_range_x, "edge_th": settings.edge_th, "calib_ok": False, "error": ""}
     t0 = time.perf_counter()
@@ -126,6 +131,9 @@ def run_setting(settings: DispSettings, param: str, value: float, *, calib_dir: 
                     "n_skipped": len(res.skipped)})
         for tag, b in (("nogate", None), ("bandgate", band)):
             per = {s: evaluate_session(stacks[s], gts[s], p, disp_max=settings.disp_max, band=b) for s in stacks}
+            for s_name, m in per.items():
+                per_rows.append({"param": param, "value": value, "session": s_name, "gt_mm": gts[s_name], "gate": tag,
+                                 **{k: m.get(k) for k in PER_SESSION_COLUMNS[5:]}})
             h = summarize_holdout(per, holdout)
             row.update({f"{k}_{tag}": h[k] for k in EVAL_KEYS})
             if tag == "nogate":
@@ -134,15 +142,15 @@ def run_setting(settings: DispSettings, param: str, value: float, *, calib_dir: 
     row.update(stability_summary(stacks))
     if bench_proc is not None:
         row.update(bench_setting(bench_proc, settings, bench_n))
-    return row
+    return row, per_rows
 
 
-def _write_csv(rows: list[dict], path: Path) -> None:
+def _write_csv(rows: list[dict], path: Path, columns: list[str] = COLUMNS) -> None:
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=columns)
         w.writeheader()
         for r in rows:
-            w.writerow({k: r.get(k, "") for k in COLUMNS})
+            w.writerow({k: r.get(k, "") for k in columns})
 
 
 def _plots(rows: list[dict], out_dir: Path) -> None:
@@ -250,9 +258,10 @@ def main(argv: list[str] | None = None) -> int:
         bench_name = f"{session}/{frame.name}"
 
     rows: list[dict] = []
+    per_rows_all: list[dict] = []
     for settings, param, value in settings_list:
         try:
-            row = run_setting(settings, param, value, calib_dir=Path(args.calib_dir), targets=targets,
+            row, per_rows = run_setting(settings, param, value, calib_dir=Path(args.calib_dir), targets=targets,
                               cap_root=cap_root, skip_first=args.skip_first, frames_per_session=args.frames_per_session,
                               band=(args.band_low, args.band_high), ransac_th=args.ransac_th,
                               cache_root_dir=cache_root_dir, bench_proc=bench_proc, bench_n=args.bench_n)
@@ -260,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[ERROR] {param}={value:g}: {e}")
             return 2
         rows.append(row)
+        per_rows_all += per_rows
         if row["calib_ok"]:
             print(f"  {param}={value:g} ({settings.key()}): MAE nogate={row['mae_mean_mm_nogate']:.1f} "
                   f"bandgate={row['mae_mean_mm_bandgate']:.1f} |bias|max={row['abs_bias_max_mm_nogate']:.1f} "
@@ -268,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"  {param}={value:g}: calibration FAILED: {row['error']}", flush=True)
     _write_csv(rows, out_dir / "settings.csv")
+    _write_csv(per_rows_all, out_dir / "per_session.csv", PER_SESSION_COLUMNS)
     summary = {
         "targets": targets, "skip_first": args.skip_first, "frames_per_session": args.frames_per_session,
         "band": [args.band_low, args.band_high], "ransac_th": args.ransac_th, "search_range_x": args.search_range,
