@@ -4,9 +4,10 @@
 3 つの部品からなる。いずれも **config.py の値は読むが書き換えない**（設定はすべて引数で受ける）。
 
 1. 視差キャッシュ: 設定（K・S・T・処理解像度）ごとに、保存 PNG（校正画像 `data/calib_imgs/<距離>.png`・
-   評価 raw `data/captures/<session>/<idx>.png`）から視差マップを 1 回だけ計算して
+   校正 raw `data/calib_raw/<距離>.png`・評価 raw `data/captures/<session>/<idx>.png`）から視差マップを 1 回だけ計算して
    `outputs/cache/disp/<設定キー>/...npy` に置く。校正帯・RANSAC・推論ゲートの探索は視差を変えないので、
    キャッシュを読むだけで何百通りでも回せる。保存する視差は **gate1 前の生値**（gate は評価側で適用する）。
+   処理解像度を変える実験（B3）は raw から `preprocess_to` で作り直し、K・S を `scaled_settings` で解像度比にスケールする。
 2. 校正の純関数 `calibrate_from_disparity`: 「視差マップ群 → 点抽出（`calibration.calibrate.extract_sign_points`）→
    RANSAC（`calibration.calibrate.ransac_fit_line`）→ 切片 → 参照式 curve_fit（`calibration.fit_params.model`）→
    DepthParams」を、`calibrate.py`／`fit_params.py` の main と同じ手順・同じ既定値で、ファイル I/O と print なしに行う。
@@ -26,6 +27,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import math
 from dataclasses import dataclass, field
 
 import cv2
@@ -77,6 +79,41 @@ class DispSettings:
         if tuple(self.image_size) != tuple(config.IMAGE_SIZE):
             k += f"_W{self.image_size[0]}xH{self.image_size[1]}"
         return k
+
+
+# ===== 処理解像度のスケール（解像度実験 B3） =====
+
+def round_to_odd(x: float) -> int:
+    """x に最も近い正の奇数を返す。2·floor(x/2)+1 なので [2n, 2n+2) → 2n+1（偶数ちょうどは上側の奇数）。"""
+    if not math.isfinite(x) or x <= 0:
+        raise ValueError(f"round_to_odd: 正の有限値が必要: {x!r}")
+    return 2 * int(math.floor(x / 2.0)) + 1
+
+
+def scale_factor(image_size: tuple[int, int], base_size: tuple[int, int] = tuple(config.IMAGE_SIZE)) -> float:
+    """処理解像度の倍率 r = W'/W_base。アスペクト比が基準（3:2）から 1 % 以上ずれる指定は拒否する。"""
+    w, h = image_size
+    bw, bh = base_size
+    if w <= 0 or h <= 0 or bw <= 0 or bh <= 0:
+        raise ValueError(f"scale_factor: 解像度は正: image_size={image_size} base_size={base_size}")
+    expected_ratio = bw / bh
+    if abs(w / h - expected_ratio) / expected_ratio > 0.01:
+        raise ValueError(f"scale_factor: アスペクト比が基準 {bw}:{bh} と 1 % 以上ずれています: {w}x{h}")
+    return w / bw
+
+
+def scaled_settings(base: DispSettings, image_size: tuple[int, int], *, scale_edge_th: bool = False) -> DispSettings:
+    """基準解像度の設定 base を image_size 用にスケールする。
+
+    視差 [px] は解像度に比例するので、ZNCC 窓 K と探索幅 S を K' = round_to_odd(K·r)、S' = round_to_odd(S·r)
+    （r = W'/W_base）にして物理的に同じ窓・同じ探索範囲を保つ。EDGE_TH は既定で不変（ランブックの設計）。
+    同じ物理エッジの Sobel 応答は ≈1/r になる交絡があるので、scale_edge_th=True で T' = T/r も選べる。
+    """
+    r = scale_factor(image_size, base.image_size)
+    return DispSettings(kernel_size=round_to_odd(base.kernel_size * r),
+                        search_range_x=round_to_odd(base.search_range_x * r),
+                        edge_th=base.edge_th / r if scale_edge_th else base.edge_th,
+                        image_size=(int(image_size[0]), int(image_size[1])))
 
 
 # ===== 画像 → 視差（realtime.pipeline.process_frame の前半と同じ手順） =====
@@ -173,6 +210,44 @@ def ensure_calib_disparity(settings: DispSettings, calib_dir: Path, *,
             if image is None:
                 raise ValueError(f"ensure_calib_disparity: 画像を読めません: {p}")
             np.save(str(dst), disparity_of_proc(calib_image_to_proc(image, settings.image_size), settings))
+        outs[depth] = dst
+    return outs
+
+
+def ensure_calib_disparity_from_raw(settings: DispSettings, raw_dir: Path, *, distances: list[int] | None = None,
+                                    root: Path | None = None, overwrite: bool = False) -> dict[int, Path]:
+    """校正 raw（`capture_calib --save-raw` の `<距離>.png`・1280×720）→ preprocess_to(settings.image_size) → 視差
+    → `<cache>/calib_raw/<距離>.npy`。戻り値は距離 → npy。
+
+    処理済み PNG 用の `ensure_calib_disparity`（`calib/`）とはキャッシュ名を分ける。既定解像度では
+    `preprocess_to(raw, IMAGE_SIZE) == camera.preprocess(raw)` なので、同じ撮影の処理済み PNG から作った視差とビット一致する
+    （テストで保証）。`distances` を渡すとその距離だけ処理し、raw が無い距離があれば FileNotFoundError にする
+    （校正距離のサブセット比較で意図しない欠落を防ぐ）。
+    """
+    raw_dir = Path(raw_dir)
+    if not raw_dir.is_dir():
+        raise FileNotFoundError(f"ensure_calib_disparity_from_raw: ディレクトリがありません: {raw_dir}")
+    found = {int(p.stem): p for p in raw_dir.iterdir() if p.suffix.lower() == ".png" and p.stem.isdigit()}
+    if not found:
+        raise FileNotFoundError(f"ensure_calib_disparity_from_raw: {raw_dir} に距離名の校正 raw がありません")
+    if distances is not None:
+        wanted = sorted({int(d) for d in distances})
+        if not wanted:
+            raise ValueError("ensure_calib_disparity_from_raw: distances が空です")
+        missing = [d for d in wanted if d not in found]
+        if missing:
+            raise FileNotFoundError(f"ensure_calib_disparity_from_raw: 校正 raw が無い距離: {missing}（{raw_dir}）")
+        found = {d: found[d] for d in wanted}
+    out_dir = cache_root(settings, root) / "calib_raw"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    outs: dict[int, Path] = {}
+    for depth in sorted(found):
+        dst = out_dir / f"{depth}.npy"
+        if overwrite or not dst.exists():
+            raw = cv2.imread(str(found[depth]))
+            if raw is None:
+                raise ValueError(f"ensure_calib_disparity_from_raw: png を読めません: {found[depth]}")
+            np.save(str(dst), disparity_of_proc(preprocess_to(raw, settings.image_size), settings))
         outs[depth] = dst
     return outs
 

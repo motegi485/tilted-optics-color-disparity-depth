@@ -20,11 +20,15 @@ from tools.analysis_common import (
     disparity_of_proc,
     edge_strength_of_proc,
     ensure_calib_disparity,
+    ensure_calib_disparity_from_raw,
     ensure_capture_disparity,
     evaluate_session,
     list_frames,
     load_stack,
     preprocess_to,
+    round_to_odd,
+    scale_factor,
+    scaled_settings,
     summarize_holdout,
 )
 
@@ -44,6 +48,39 @@ def test_settings_defaults_key_and_limits():
                 dict(image_size=(0, 10))):
         with pytest.raises(ValueError):
             DispSettings(**bad)
+
+
+SIZES = [(264, 176), (396, 264), (528, 352), (660, 440), (792, 528), (1056, 704)]   # B3 の 6 水準（3:2）
+
+
+def test_round_to_odd_and_scale_factor():
+    assert [round_to_odd(x) for x in (8.5, 12.75, 17, 21.25, 25.5, 34)] == [9, 13, 17, 21, 25, 35]     # K=17 × r
+    assert [round_to_odd(x) for x in (20.5, 30.75, 41, 51.25, 61.5, 82)] == [21, 31, 41, 51, 61, 83]   # S=41 × r
+    assert round_to_odd(1.0) == 1 and round_to_odd(0.3) == 1 and round_to_odd(33.99) == 33
+    for bad in (0, -3, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            round_to_odd(bad)
+    assert [scale_factor(s) for s in SIZES] == [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    assert scale_factor((1056, 704), (528, 352)) == 2.0
+    for bad in ((640, 480), (528, 340), (0, 0), (100, -5)):          # 4:3・3:2 から 1 % 超のずれ・非正
+        with pytest.raises(ValueError):
+            scale_factor(bad)
+
+
+def test_scaled_settings_scales_kernel_search_and_optionally_edge_th():
+    base = DispSettings(kernel_size=17, search_range_x=41, edge_th=30.0)
+    scaled = [scaled_settings(base, s) for s in SIZES]
+    assert [s.kernel_size for s in scaled] == [9, 13, 17, 21, 25, 35]
+    assert [s.search_range_x for s in scaled] == [21, 31, 41, 51, 61, 83]
+    assert all(s.edge_th == 30.0 for s in scaled)                      # 既定では T 固定
+    assert [tuple(s.image_size) for s in scaled] == SIZES
+    assert scaled_settings(base, config.IMAGE_SIZE) == base            # 基準解像度では不変
+    big = scaled_settings(base, (1056, 704))
+    assert big.key() == "K35_S83_T30_W1056xH704" and big.disp_max == 41.0 and big.reach_max == 40.5
+    assert scaled_settings(base, (1056, 704), scale_edge_th=True).edge_th == 15.0
+    assert scaled_settings(base, (264, 176), scale_edge_th=True).edge_th == 60.0
+    with pytest.raises(ValueError):
+        scaled_settings(base, (640, 480))
 
 
 # ---------- 画像 → 視差 ----------
@@ -126,6 +163,43 @@ def test_capture_and_calib_cache_roundtrip(tmp_path):
     assert sorted(c) == [1400, 1600, 1800] and all(p.exists() for p in c.values())
     with pytest.raises(FileNotFoundError):
         ensure_calib_disparity(s, tmp_path / "empty_dir_missing", root=tmp_path / "out")
+
+
+def test_calib_raw_cache_matches_processed_png_at_default_size(tmp_path):
+    """capture_calib --save-raw は raw と preprocess(raw) の両方を可逆 PNG で保存する。既定解像度では raw 経路の視差が
+    処理済み PNG 経路（ensure_calib_disparity）とビット一致し、他解像度では preprocess_to で作り直せること。"""
+    raw_dir = tmp_path / "calib_raw"
+    proc_dir = tmp_path / "calib_imgs"
+    raw_dir.mkdir()
+    proc_dir.mkdir()
+    raws = {d: _raw() for d in (1400, 1600, 1800)}
+    for d, raw in raws.items():
+        cv2.imwrite(str(raw_dir / f"{d}.png"), raw)
+        cv2.imwrite(str(proc_dir / f"{d}.png"), preprocess(raw))          # capture_calib と同じ保存
+    (raw_dir / ".gitkeep").write_text("", encoding="utf-8")                # 距離名でないファイルは無視
+    s = DispSettings()
+    a = ensure_calib_disparity_from_raw(s, raw_dir, root=tmp_path / "out")
+    b = ensure_calib_disparity(s, proc_dir, root=tmp_path / "out")
+    assert sorted(a) == [1400, 1600, 1800] and a[1400].parent == cache_root(s, tmp_path / "out") / "calib_raw"
+    for d in a:
+        np.testing.assert_array_equal(np.load(str(a[d])), np.load(str(b[d])))   # NaN の位置も含めて一致
+    mtime = a[1400].stat().st_mtime_ns
+    sub = ensure_calib_disparity_from_raw(s, raw_dir, distances=[1600, 1400], root=tmp_path / "out")
+    assert list(sub) == [1400, 1600] and a[1400].stat().st_mtime_ns == mtime     # サブセット・既存はスキップ
+    with pytest.raises(FileNotFoundError):
+        ensure_calib_disparity_from_raw(s, raw_dir, distances=[1600, 2000], root=tmp_path / "out")   # raw の無い距離
+    with pytest.raises(ValueError):
+        ensure_calib_disparity_from_raw(s, raw_dir, distances=[], root=tmp_path / "out")
+    with pytest.raises(FileNotFoundError):
+        ensure_calib_disparity_from_raw(s, tmp_path / "nope", root=tmp_path / "out")
+    small = scaled_settings(DispSettings(), (264, 176))
+    c = ensure_calib_disparity_from_raw(small, raw_dir, distances=[1400], root=tmp_path / "out")
+    assert np.load(str(c[1400])).shape == (176, 264)
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    cv2.imwrite(str(bad / "1400.png"), preprocess(raws[1400]))            # 528×352 は raw ではない
+    with pytest.raises(ValueError):
+        ensure_calib_disparity_from_raw(s, bad, root=tmp_path / "out_bad")   # 別キャッシュ（既存 npy の再利用を避ける）
 
 
 # ---------- 校正 ----------
