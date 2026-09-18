@@ -192,9 +192,12 @@ def _plots(rows: list[dict], bench_rows: list[dict], out_dir: Path) -> None:
     ax.set_ylabel("valid rate (interior)")
     ax.legend(fontsize=8)
     ax = axes[1, 0]
+    base_w = config.IMAGE_SIZE[0]
     for session in sorted({b["session"] for b in bench_rows}):
-        bs = [b for b in bench_rows if b["session"] == session]
-        ax.plot([b["width"] for b in bs], [b["p95_ms"] for b in bs], "o-", label=f"{session} (E={bs[0]['edge_px_bench']})")
+        bs = sorted((b for b in bench_rows if b["session"] == session), key=lambda b: b["width"])
+        ref = next((b for b in bs if b["width"] == base_w), bs[0])      # 凡例の E は基準解像度（無ければ最小）の値
+        ax.plot([b["width"] for b in bs], [b["p95_ms"] for b in bs], "o-",
+                label=f"{session} (E@{ref['width']}={ref['edge_px_bench']})")
     ax.axhline(1000.0 / 30.0, color="0.5", ls="--", lw=1)
     ax.set_ylabel("disparity p95 [ms] (bench frame)")
     ax.set_yscale("log")
