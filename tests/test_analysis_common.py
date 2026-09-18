@@ -107,18 +107,23 @@ def test_calib_image_guard():
         calib_image_to_proc(_raw(), config.IMAGE_SIZE)                   # 16:9 の raw 誤投入は拒否
 
 
-def test_disparity_of_proc_reproduces_process_frame_after_gate1():
-    """生視差に gate1 を掛けて参照式に通せば process_frame とビット一致する（同じ手順の証明）。"""
+def test_disparity_of_proc_reproduces_process_frame_after_gates():
+    """生視差に gate1＋推論帯（config.INFER_BAND_LOW/HIGH・2026-09-18）を掛けて参照式に通せば
+    process_frame とビット一致する（同じ手順の証明。実験の評価器 apply_gates と本番の定義が同じことの根拠）。"""
     proc = preprocess(_raw())
     params = DepthParams(v_pos=426165.15, u_pos=-61.04, a_pos=-26.43, w_pos=0.0,
                          v_neg=411311.86, u_neg=-17.39, a_neg=-22.76, w_neg=0.0)
     disp = disparity_of_proc(proc, DispSettings())
     assert disp.shape == (H, W) and disp.dtype == np.float32
-    depth = depth_of(apply_gates(disp, disp_max=config.DISP_MAX), params)
+    band = (config.INFER_BAND_LOW, config.INFER_BAND_HIGH)
+    depth = depth_of(apply_gates(disp, disp_max=config.DISP_MAX, band=band), params)
     ref = process_frame(proc, params)
     assert np.array_equal(np.isnan(depth), np.isnan(ref))
     assert np.array_equal(depth[~np.isnan(depth)], ref[~np.isnan(ref)])
-    # 到達上限: gate1 (|d| > 15) は 1 画素も落とさない
+    # 推論帯なし（gate1 のみ）とは一致しない＝推論帯が実際に効いていることの確認
+    depth_g1 = depth_of(apply_gates(disp, disp_max=config.DISP_MAX), params)
+    assert np.count_nonzero(~np.isnan(depth_g1)) > np.count_nonzero(~np.isnan(ref))
+    # 到達上限: gate1 (|d| > DISP_MAX) は 1 画素も落とさない
     assert np.nanmax(np.abs(disp)) <= DispSettings().reach_max
     with pytest.raises(ValueError):
         disparity_of_proc(proc[:, :, 0], DispSettings())

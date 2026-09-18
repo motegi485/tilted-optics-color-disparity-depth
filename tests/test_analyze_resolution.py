@@ -144,7 +144,8 @@ def test_cli_end_to_end_scales_settings_and_recovers_scaled_coefficients(tmp_pat
     assert _read(out / "bench.csv") == []
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["image_sizes"] == ["264x176", "528x352", "1056x704"] and summary["calib_distances"] == CORE
-    assert summary["base"] == {"kernel_size": 17, "search_range_x": 41, "edge_th": 30.0, "image_size": [528, 352]}
+    assert summary["base"] == {"kernel_size": 17, "search_range_x": 41, "edge_th": float(config.EDGE_TH),   # T は config 既定
+                               "image_size": [528, 352]}
     assert summary["bench_frames"] == [] and summary["scale_edge_th"] is False
 
 

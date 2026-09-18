@@ -67,7 +67,8 @@ def test_predicted_max_disparity_signs_and_monotonic():
 def test_bench_rows(monkeypatch):
     monkeypatch.setattr(common, "calcDisparityByZNCC", lambda red, blue, k, s, t: np.full((H, W), np.nan, np.float32))
     proc = np.random.default_rng(0).integers(0, 256, size=(H, W, 3), dtype=np.uint8)
-    rows = bench_search_ranges(proc, [common.DispSettings(), common.DispSettings(search_range_x=41)], n=3)
+    # S を明示（config 既定は 2026-09-18 に 31 → 41 になったため既定に依存させない）
+    rows = bench_search_ranges(proc, [common.DispSettings(search_range_x=31), common.DispSettings(search_range_x=41)], n=3)
     assert [r["search_range_x"] for r in rows] == [31, 41] and set(rows[0]) | {"frame"} == set(BENCH_COLUMNS)
     assert all(r["n"] == 3 and r["min_ms"] <= r["mean_ms"] <= r["p95_ms"] + 1e-9 for r in rows)
     assert rows[0]["edge_px"] == rows[1]["edge_px"] > 0
@@ -79,8 +80,10 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
         d = np.full((H, W), np.nan, dtype=np.float32)
         d[:, :100] = 3.0
         d[:, 100:110] = min(12.0, reach)            # S=21 では 9.5 に張り付く
-        d[:, 110:115] = min(20.0, reach)            # S=31 では 14.5 に張り付き、S=51 では 20.0
-        return d
+        d[:, 110:115] = min(21.0, reach)            # 基準 S（config 既定 41）では到達上限 19.5 に張り付き、S=51 では 21.0
+        return d                                    # （20.0 だと基準 19.5 との差が「変化」の閾値 0.5 px ちょうどになるため 21.0）
+
+    base_reach = common.DispSettings().reach_max     # 基準 S の到達上限（S=41 なら 19.5・旧 S=31 なら 14.5）
 
     monkeypatch.setattr(common, "calcDisparityByZNCC", fake_zncc)
     cap = tmp_path / "captures" / "dist_2000"
@@ -102,20 +105,21 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     assert rc == 0
     with (out / "distribution.csv").open(encoding="utf-8", newline="") as f:
         dist = list(csv.DictReader(f))
-    assert len(dist) == 1 and float(dist[0]["max"]) == 14.5 and float(dist[0]["frac_ge_reach"]) == pytest.approx(5 / 115)
+    assert len(dist) == 1 and float(dist[0]["max"]) == base_reach and float(dist[0]["frac_ge_reach"]) == pytest.approx(5 / 115)
     with (out / "search_range_compare.csv").open(encoding="utf-8", newline="") as f:
         cmp_rows = {r["search_range_x"]: r for r in csv.DictReader(f)}
     assert set(cmp_rows) == {"21", "51"} and cmp_rows["21"]["frames"] == "2"
-    assert float(cmp_rows["21"]["frac_changed"]) == pytest.approx(15 / 115)      # 12→9.5 と 14.5→9.5 が変化
-    assert float(cmp_rows["51"]["frac_changed"]) == pytest.approx(5 / 115)       # 14.5→20 だけ変化
+    assert float(cmp_rows["21"]["frac_changed"]) == pytest.approx(15 / 115)      # 12→9.5 と base_reach→9.5 が変化
+    assert float(cmp_rows["51"]["frac_changed"]) == pytest.approx(5 / 115)       # base_reach→21 だけ変化
     assert float(cmp_rows["51"]["frac_beyond_base_reach"]) == pytest.approx(5 / 115)
     with (out / "predicted_max_disparity.csv").open(encoding="utf-8", newline="") as f:
         pred = list(csv.DictReader(f))
     assert [float(r["z_mm"]) for r in pred] == [1000.0, 1500.0, 2000.0]
     with (out / "bench.csv").open(encoding="utf-8", newline="") as f:
         bench = list(csv.DictReader(f))
-    assert [r["search_range_x"] for r in bench] == ["31", "21", "51"] and bench[0]["frame"] == "dist_2000/000000.png"
+    assert [r["search_range_x"] for r in bench] == [str(config.SEARCH_RANGE_X), "21", "51"]
+    assert bench[0]["frame"] == "dist_2000/000000.png"
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert summary["base"]["reach_max"] == 14.5 and summary["compared_search_ranges"] == [21, 51]
+    assert summary["base"]["reach_max"] == base_reach and summary["compared_search_ranges"] == [21, 51]
     assert main(["--sessions", "dist_2000", "--captures-dir", str(tmp_path / "captures"), "--search-ranges", "20",
                  "--params", str(params_csv)]) == 2                                  # 偶数 S は拒否

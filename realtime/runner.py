@@ -432,6 +432,8 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
             "SEARCH_RANGE_X": config.SEARCH_RANGE_X,
             "EDGE_TH": config.EDGE_TH,
             "DISP_MAX": config.DISP_MAX,
+            "INFER_BAND_LOW": config.INFER_BAND_LOW,     # 推論帯（2026-09-18 新設）。過去セッションの meta.json には無い
+            "INFER_BAND_HIGH": config.INFER_BAND_HIGH,
         },
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "source_type": type(source).__name__,
@@ -532,7 +534,7 @@ def run(
 
                     t0 = time.perf_counter()
                     proc = preprocess(raw)             # raw -> (352,528,3)（runner が適用・docs/architecture.md）
-                    depth = process_frame(proc, params)  # -> depth_map（NaN 伝播・gate1 のみ適用済み）
+                    depth = process_frame(proc, params)  # -> depth_map（NaN 伝播・視差ゲート gate1＋推論帯のみ適用済み・gate2 は表示側）
                     dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（Phase D ベンチの素データ）
 
                     color = to_colormap(depth, config.DEPTH_MIN, config.DEPTH_MAX)  # クリーン版を1回だけ生成

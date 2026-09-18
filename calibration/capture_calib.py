@@ -197,6 +197,7 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
     pipeline/evaluate と同一のチャンネル分割（cv2.split の BGR 順で G を破棄し blue/red を割当）と
     同一 gate1（|d|>DISP_MAX を NaN）を当て、有効点数・pos/neg 点数・|d| 最大・clip 警告・
     calibrate 採用帯（DISP_PLOT_LOW<|d|<DISP_PLOT_HEIGHT）の予測点数を表示する。
+    推論帯（config.INFER_BAND_LOW/HIGH・2026-09-18）は掛けない: これは校正撮影の診断で、校正は校正帯を使うため。
     core は読むだけ・純関数呼び出し・無改変。
     """
     # pipeline.process_frame / evaluate.evaluate と一致させる: blue, _, red = cv2.split(...)

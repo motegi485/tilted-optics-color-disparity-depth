@@ -1,7 +1,8 @@
 """realtime/pipeline.py — 毎フレーム処理（docs/architecture.md のオンラインデータフロー・docs/module-realtime.md）。
 
 evaluate.py の per-frame core パスと同一手順で depth マップを返す（R/B 分割 →
-ZNCC → gate1(|d|>DISP_MAX) → depth）ことが、ふるまい一致（docs/requirements-and-status.md）の前提。
+ZNCC → gate1(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=INFER_BAND_HIGH を NaN・2026-09-18 新設)
+→ depth）ことが、ふるまい一致（docs/requirements-and-status.md）の前提。
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
 core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<50000) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の
@@ -39,8 +40,13 @@ def process_frame(proc_bgr, params):
     # 2) ZNCC で視差マップを算出
     disp = calcDisparityByZNCC(red, blue, config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
 
-    # 3) gate1: 視差絶対値が大きすぎる画素を無効化（NaN）
+    # 3) gate1: 視差絶対値が探索半幅を超える画素を無効化（NaN）。S=41 では到達上限 19.5 < 20 で不発（安全網として維持）
     disp[np.abs(disp) > config.DISP_MAX] = np.nan
+
+    # 3') 推論帯: 合焦面近傍の不感帯 |d| <= INFER_BAND_LOW と、大ぼけ域 |d| >= INFER_BAND_HIGH を無効化（NaN）。
+    #     NaN との比較は False なので gate1 で落ちた画素はそのまま。定義は tools/analysis_common.apply_gates と同一
+    abs_disp = np.abs(disp)
+    disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
 
     # 4) 経験式（参照式）で視差→深度に変換。NaN はそのまま伝播する
     depth = compute_depth(

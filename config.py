@@ -27,12 +27,18 @@ BASELINE_PARAMS_PATH = BASELINE_DIR / "fit_result.csv"
 IMAGE_SIZE = (528, 352)
 
 # ===== 視差算出 (core/disparity.py へ注入) =====
-KERNEL_SIZE = 17
-SEARCH_RANGE_X = 31      # 奇数。長距離化で拡大
-EDGE_TH = 30            # 校正・推論で統一
+# 2026-09-18 に設定値の最適化実験で決定（docs/records/2026-09-18/記録票.md §4.8・§6・§7）。旧値 K=17・S=31・T=30
+KERNEL_SIZE = 25         # ZNCC 窓。解像度 × K スイープで 528×352 では K=25 が底（記録票 §4.8・§7）
+SEARCH_RANGE_X = 41      # 奇数。対象距離レンジ 1000〜4000 mm の予測最大視差 13.8 px に対し S=31 は余裕 0.7 px しかない（2026-09-16 記録票 §5.3）
+EDGE_TH = 20            # 校正・推論で統一。int のまま（解析ツールの視差キャッシュのキー "T20" と一致させる）。T スイープの膝（記録票 §6.1）
 
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
-DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 15。search 半幅と一致
+DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 20。search 半幅と一致。ZNCC の到達上限は 19.5 px なので実質不発（推論帯の上限に吸収）。安全網として維持
+# 推論帯（2026-09-18 新設・記録票 §6.3〜§6.4・§7）: 推論時に |d| <= LOW または |d| >= HIGH の画素を NaN にする
+# （残るのは LOW < |d| < HIGH。校正帯と同じ厳密不等号）。下限は合焦面近傍の不感帯、上限は大ぼけ域の誤マッチ・遠距離 bias を抑える膝。
+# 校正（calibrate.py）には掛けない（校正は DISP_PLOT_LOW/HEIGHT の校正帯を使う）。
+INFER_BAND_LOW  = 0.45
+INFER_BAND_HIGH = 5.0
 DEPTH_MIN = 0
 DEPTH_MAX = 50000  # 現行の Z 範囲。一時変更する場合は必ず戻すこと
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）

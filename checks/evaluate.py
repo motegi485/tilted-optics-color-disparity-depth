@@ -18,9 +18,13 @@ from core.depth import compute_depth
 from core.params import load_params
 
 
-# docs/verification-and-tools.md の回帰アンカー（2026-06-14 確定・DEPTH_MAX=50000 前提）
+# docs/verification-and-tools.md の回帰アンカー（DEPTH_MAX=50000・params/baseline/ 前提）。
+# 2026-09-18 に設定変更（K17/S31/T30・gate1 のみ → K25/S41/T20・gate1＋推論帯 (0.45, 5)）に伴い取り直した値
+# （実測 平均 2213.3627 / MAE 218.9271 / 有効 6339・記録票 2026-09-18 §8）。baseline 係数は旧設定の静止画校正値のままなので
+# 距離の物理的な正しさではなく「計算経路が変わっていないこと」を検出するアンカーである。
+# 旧設定のアンカー（2026-06-14 確定）: 平均 2313.9 / MAE 316.8 / 有効画素 7613（config を旧値に戻せば再現する）。
 EXPECTED = {
-    "2300.jpg": {"mean": 2313.9, "mae": 316.8, "valid": 7613},
+    "2300.jpg": {"mean": 2213.4, "mae": 218.9, "valid": 6339},
 }
 TOL_MM = 0.05   # 平均・MAE の許容差（表示精度 0.1mm の半分）
 
@@ -40,6 +44,10 @@ def evaluate(image_path: Path, params, gt_distance: int):
 
     # ゲート1: 探索半幅超の視差を無効化（core の外で適用）
     disp[np.abs(disp) > config.DISP_MAX] = np.nan
+
+    # 推論帯（2026-09-18 新設）: |d| <= INFER_BAND_LOW または |d| >= INFER_BAND_HIGH を無効化（pipeline と同一手順）
+    abs_disp = np.abs(disp)
+    disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
 
     depth = compute_depth(
         disp,

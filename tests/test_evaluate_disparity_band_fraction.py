@@ -27,7 +27,7 @@ def _disp_frame() -> np.ndarray:
     d[155, 10:15] = 0.45     # 境界 |d| == band_low → below_band（校正は > low しか採らない）・5 px
     d[50, 10:40] = 3.0       # in_band・pos・30 px
     d[300, 10:40] = -3.0     # in_band・neg・30 px
-    d[100, 10:15] = 10.0     # above_band・pos・5 px（gate1 の DISP_MAX=15 は通る）
+    d[100, 10:15] = 10.0     # above_band・pos・5 px（gate1 の DISP_MAX=20 は通る。推論帯 HIGH=5 では落ちる → z_live で NaN）
     d[105, 10:15] = 7.5      # 境界 |d| == band_high → above_band（校正は < high しか採らない）・5 px
     d[170, 10:15] = 0.0      # d == 0 → compute_depth が NaN にする（有効画素に入らない）
     return d
@@ -42,9 +42,17 @@ def _depth_of(d: np.ndarray) -> np.ndarray:
                          PARAMS.v_neg, PARAMS.u_neg, PARAMS.a_neg, PARAMS.w_neg, config.EPS_DEN)
 
 
+def _depth_live_of(d: np.ndarray) -> np.ndarray:
+    """本番（process_frame）と同じ推論帯 |d| <= LOW または |d| >= HIGH → NaN を掛けた z（照合用・2026-09-18）。"""
+    d2 = d.copy()
+    ad = np.abs(d2)
+    d2[(ad <= config.INFER_BAND_LOW) | (ad >= config.INFER_BAND_HIGH)] = np.nan
+    return _depth_of(d2)
+
+
 def _fake_compute(raw, params):
     d = _disp_frame()
-    return d, _depth_of(d)
+    return d, _depth_of(d), _depth_live_of(d)
 
 
 def _write_pngs(cap_dir, n: int, size=(8, 8)) -> None:
@@ -109,16 +117,44 @@ def test_roi_skip_and_max_frames(tmp_path):
 def test_replay_match_true_false_and_missing(tmp_path):
     cap = tmp_path / "cap" / "dist_2000"
     _write_pngs(cap, 2)
-    good = _depth_of(_disp_frame())
+    good = _depth_live_of(_disp_frame())                  # 保存 npy は本番手順（推論帯適用後）の値
     out = tmp_path / "out" / "dist_2000"
     _write_npys(out, 2, good)
-    assert summarize_session(cap, out, 2000, PARAMS, roi=FULL, compute=_fake_compute)["replay_match"] is True
+    r = summarize_session(cap, out, 2000, PARAMS, roi=FULL, compute=_fake_compute)
+    assert r["replay_match"] is True
+    # 区分の集計は推論帯を掛ける前の (d, z) で行う: 推論帯で落ちる below_band・above_band も数えられている
+    assert r["n_below_band"] == N_BELOW * 2 and r["n_above_band"] == N_ABOVE * 2
     bad = good.copy()
-    bad[50, 10] += 1.0                                    # 有限値 1 画素の不一致
+    bad[50, 10] += 1.0                                    # 有限値 1 画素の不一致（行 50 は帯内 d=3.0）
     np.save(str(out / "000001.npy"), bad)
     assert summarize_session(cap, out, 2000, PARAMS, roi=FULL, compute=_fake_compute)["replay_match"] is False
     (out / "000001.npy").unlink()                         # npy 欠落も False
     assert summarize_session(cap, out, 2000, PARAMS, roi=FULL, compute=_fake_compute)["replay_match"] is False
+
+
+def test_replay_match_false_for_npy_without_inference_band(tmp_path):
+    """推論帯を掛けていない z（2026-09-18 以前の旧設定セッションの保存 npy に相当）とは照合不一致になる。"""
+    cap = tmp_path / "cap" / "dist_2000"
+    _write_pngs(cap, 1)
+    out = tmp_path / "out" / "dist_2000"
+    _write_npys(out, 1, _depth_of(_disp_frame()))        # gate1 のみの z
+    assert summarize_session(cap, out, 2000, PARAMS, roi=FULL, compute=_fake_compute)["replay_match"] is False
+
+
+def test_disparity_and_depth_live_matches_process_frame():
+    """既定の compute（本物の ZNCC）で、z_live が realtime.pipeline.process_frame とビット一致し、
+    z（gate1 のみ）は推論帯ぶん有効画素が多いことを確認する。"""
+    from realtime.camera import preprocess
+    from realtime.pipeline import process_frame
+
+    rng = np.random.default_rng(0)
+    raw = rng.integers(0, 256, size=(config.WEBCAM_NATIVE_SIZE[1], config.WEBCAM_NATIVE_SIZE[0], 3), dtype=np.uint8)
+    d, z, z_live = mod.disparity_and_depth(raw, PARAMS)
+    ref = process_frame(preprocess(raw), PARAMS)
+    assert np.array_equal(np.isnan(z_live), np.isnan(ref))
+    assert np.array_equal(z_live[~np.isnan(z_live)], ref[~np.isnan(ref)])
+    assert np.count_nonzero(~np.isnan(z)) > np.count_nonzero(~np.isnan(z_live))
+    assert d.shape == z.shape == z_live.shape == (H, W)
 
 
 def test_no_valid_pixels_gives_nan_stats(tmp_path):
@@ -127,7 +163,7 @@ def test_no_valid_pixels_gives_nan_stats(tmp_path):
 
     def all_nan(raw, params):
         d = np.full((H, W), np.nan, dtype=np.float32)
-        return d, _depth_of(d)
+        return d, _depth_of(d), _depth_of(d)
 
     r = summarize_session(cap, None, 2000, PARAMS, roi=FULL, compute=all_nan)
     assert r["n_valid_total"] == 0 and r["n_below_band"] == 0
@@ -165,7 +201,7 @@ def test_cli_writes_csv_and_exit_codes(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "calcDisparityByZNCC", lambda red, blue, k, s, t: _disp_frame())
     cap_root, out_root = tmp_path / "captures", tmp_path / "outputs"
     _write_pngs(cap_root / "dist_2000", 3, size=config.WEBCAM_NATIVE_SIZE)   # preprocess を通す実寸 PNG
-    _write_npys(out_root / "dist_2000", 3, _depth_of(_disp_frame()))
+    _write_npys(out_root / "dist_2000", 3, _depth_live_of(_disp_frame()))   # 保存 npy は推論帯適用後
     params_csv = tmp_path / "fit_result.csv"
     _write_params_csv(params_csv)
     out_csv = tmp_path / "bands.csv"

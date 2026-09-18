@@ -1,18 +1,25 @@
 """evaluate_disparity_band_fraction.py — 校正帯（calibration band）に対する有効画素の視差分布の集計（実験ランブック手順 8'）。
 
 校正（calibration/calibrate.py）は DISP_PLOT_LOW < |d| < DISP_PLOT_HEIGHT（= 0.45 < |d| < 7.5 px・以下
-「校正帯」）の画素だけで直線 y = a·d + b を当て、d = 0 の切片を枝ごとに外挿する。推論
-（realtime/pipeline.py）は |d| > DISP_MAX の画素しか捨てないので、校正帯の外側の画素にも深度が付く。
+「校正帯」）の画素だけで直線 y = a·d + b を当て、d = 0 の切片を枝ごとに外挿する。2026-09-18 までの推論
+（realtime/pipeline.py）は |d| > DISP_MAX の画素しか捨てなかったので、校正帯の外側の画素にも深度が付いた。
 特に校正帯の下側（|d| ≤ 0.45 px）の画素は外挿域にあり、pos/neg のどちらの枝に落ちるかで異なる深度
 になる（論文の限界の節）。本スクリプトは、距離別精度評価（checks.evaluate_distance_accuracy）の
 有効画素を校正帯基準で 3 区分し、それぞれの画素数・割合・誤差を出す。
 
+2026-09-18 の推論帯（config.INFER_BAND_LOW/HIGH・|d| <= low または |d| >= high を NaN）の導入後も、
+3 区分は**推論帯を掛ける前**（gate1 後）の視差・深度で分ける（帯の外側の画素がどれだけあり、
+どれだけ誤差に寄与するかを見る、というこのツールの目的を保つため）。replay_match の照合だけは
+本番と同じ gate1＋推論帯の深度 z_live で行う（保存 npy は推論帯適用後の値なので）。
+
 計算経路: 保存 PNG（data/captures/{session}/{i:06d}.png）を realtime.camera.preprocess →
 core.disparity.calcDisparityByZNCC → gate1（|d| > DISP_MAX → NaN）→ core.depth.compute_depth の
-順に realtime.pipeline.process_frame と同じ手順で再計算し、視差マップ d と深度マップ z を両方得る
-（process_frame は z しか返さないので同じ手順を辿る）。再計算した z は保存 npy（唯一の正本）と
-NaN 位置＋有限値のビット一致を確認し（checks.verify_clip_replay と同じ判定）、一致しなければ
-その旨を CSV（replay_match）と標準出力に残す。
+順に再計算して視差マップ d と深度マップ z（区分・誤差用）を得、別途 gate1 → 推論帯 → compute_depth で
+realtime.pipeline.process_frame と同じ手順の z_live を得る（process_frame は z しか返さないので同じ
+手順を辿る）。z_live は保存 npy（唯一の正本）と NaN 位置＋有限値のビット一致を確認し
+（checks.verify_clip_replay と同じ判定）、一致しなければその旨を CSV（replay_match）と標準出力に残す。
+2026-09-18 以前に旧設定（K17/S31/T30・推論帯なし）で録画したセッションでは replay_match は False になる
+（docs/known-issues.md）。
 
 集計の定義（distance_accuracy と同じ有効画素・ROI・暖機除外）:
   - 有効画素  : gate2 と同じ config.DEPTH_MIN < z < config.DEPTH_MAX を満たす画素（ROI 内）。
@@ -82,22 +89,32 @@ def list_capture_files(cap_dir: Path) -> list[Path]:
     return sorted(p for p in cap_dir.glob("??????.png") if p.stem.isdigit())
 
 
-def disparity_and_depth(raw: np.ndarray, params: DepthParams) -> tuple[np.ndarray, np.ndarray]:
-    """raw(1280x720 BGR) → (視差マップ d, 深度マップ z)。realtime.pipeline.process_frame と同じ手順。
+def _depth_of(disp: np.ndarray, params: DepthParams) -> np.ndarray:
+    return compute_depth(
+        disp,
+        params.v_pos, params.u_pos, params.a_pos, params.w_pos,
+        params.v_neg, params.u_neg, params.a_neg, params.w_neg,
+        config.EPS_DEN)
 
-    process_frame は z しか返さないため同じ 4 段（R/B 分割 → ZNCC → gate1 → 参照式）をここで辿る。
-    z の一致は呼び出し側が保存 npy と照合する（手順が乖離したら検出できる）。
+
+def disparity_and_depth(raw: np.ndarray, params: DepthParams) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """raw(1280x720 BGR) → (視差マップ d, 深度マップ z, 本番深度 z_live)。
+
+    d と z は gate1 のみ（R/B 分割 → ZNCC → gate1 → 参照式）で、3 区分と区分ごとの誤差に使う。
+    z_live は realtime.pipeline.process_frame と同じ手順（gate1 → 推論帯 → 参照式・2026-09-18）で、
+    呼び出し側が保存 npy と照合する（手順が乖離したら検出できる）。process_frame は z しか返さないため
+    同じ段をここで辿る。
     """
     proc = preprocess(raw)
     blue, _, red = cv2.split(proc)
     disp = calcDisparityByZNCC(red, blue, config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
     disp[np.abs(disp) > config.DISP_MAX] = np.nan          # gate1
-    depth = compute_depth(
-        disp,
-        params.v_pos, params.u_pos, params.a_pos, params.w_pos,
-        params.v_neg, params.u_neg, params.a_neg, params.w_neg,
-        config.EPS_DEN)
-    return disp, depth
+    depth = _depth_of(disp, params)                         # 区分・誤差用（推論帯なし）
+    disp_live = disp.copy()                                 # 推論帯（process_frame と同一定義）
+    abs_disp = np.abs(disp_live)
+    disp_live[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
+    depth_live = _depth_of(disp_live, params)               # 照合用（本番と同じ）
+    return disp, depth, depth_live
 
 
 def summarize_session(cap_dir: Path, out_dir: Path | None, gt_mm: int, params: DepthParams, *,
@@ -107,10 +124,11 @@ def summarize_session(cap_dir: Path, out_dir: Path | None, gt_mm: int, params: D
                       compute=disparity_and_depth) -> dict:
     """1 セッションの保存 PNG を再計算して COLUMNS のサブセット dict を返す。
 
-    out_dir が None でなく対応する npy があれば再計算 z をビット照合し、replay_match に
-    True/False を入れる（npy が 1 枚でも無い・不一致なら False。out_dir=None なら ""）。
+    3 区分と誤差は gate1 のみの (d, z) で数える。out_dir が None でなく対応する npy があれば
+    本番手順（gate1＋推論帯）の z_live をビット照合し、replay_match に True/False を入れる
+    （npy が 1 枚でも無い・不一致なら False。out_dir=None なら ""）。
     有効画素が 0 件のときは n_valid_total=0 とし、割合・誤差統計は NaN で埋める。
-    compute は差し替え可能（テストで ZNCC を既知の視差に置き換えるため・本番は既定のまま）。
+    compute は (d, z, z_live) を返す関数で差し替え可能（テストで ZNCC を既知の視差に置き換えるため・本番は既定のまま）。
     """
     if skip_first < 0:
         raise ValueError(f"--skip-first は0以上: {skip_first}")
@@ -139,13 +157,13 @@ def summarize_session(cap_dir: Path, out_dir: Path | None, gt_mm: int, params: D
         raw = cv2.imread(str(p))
         if raw is None:
             raise ValueError(f"{p}: png を読めません")
-        disp, depth = compute(raw, params)
+        disp, depth, depth_live = compute(raw, params)
         if out_dir is not None:
             npy = out_dir / f"{p.stem}.npy"
             if not npy.exists():
                 replay_ok = False
             else:
-                ok, _ = _compare(np.load(str(npy)), depth)
+                ok, _ = _compare(np.load(str(npy)), depth_live)   # 保存 npy は本番手順（推論帯適用後）の値
                 if not ok:
                     replay_ok = False
         h, w = depth.shape
@@ -290,7 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         if r["replay_match"] is False:
             any_mismatch = True
             print(f"[WARN] {session}: 再計算した深度が保存 npy とビット一致しないフレームがあります"
-                  f"（params={params_path}。checks.verify_clip_replay で確認）")
+                  f"（params={params_path}。checks.verify_clip_replay で確認。"
+                  f"旧設定で録画したセッションなら想定どおり: docs/known-issues.md）")
         rows.append(r)
         print(f"  {session}: valid={r['n_valid_total']} below_band={r['n_below_band']} "
               f"below_band_fraction={_fmt(r['below_band_fraction'])} replay_match={r['replay_match']}")
@@ -302,7 +321,8 @@ def main(argv: list[str] | None = None) -> int:
             "mean_err_below_band_mm", "mae_below_band_mm", "mean_err_in_band_mm", "mae_in_band_mm",
             "mean_err_above_band_mm", "mae_above_band_mm", "replay_match"]
     print(f"\ngate2: {config.DEPTH_MIN} < z < {config.DEPTH_MAX} [mm]  band: {args.band_low} < |d| < {args.band_high} px  "
-          f"roi={rows[0]['roi']}  skip_first={args.skip_first}  max_frames={args.max_frames}")
+          f"roi={rows[0]['roi']}  skip_first={args.skip_first}  max_frames={args.max_frames}  "
+          f"(区分は推論帯 {config.INFER_BAND_LOW} < |d| < {config.INFER_BAND_HIGH} を掛ける前・replay_match は掛けた後の z)")
     print("  ".join(show))
     for r in rows:
         print("  ".join(_fmt(r.get(k, "")) for k in show))

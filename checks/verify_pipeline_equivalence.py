@@ -3,7 +3,7 @@ realtime.pipeline.process_frame と evaluate.py の per-frame core パス（集�
 固定入力でビット一致することを検証する（docs/requirements-and-status.md の「経路の同値性」Done基準）。
 
 Path A: realtime.pipeline.process_frame（実モジュール）
-Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → compute_depth）
+Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → 推論帯 → compute_depth）
 両者の depth マップが NaN 位置・有限値とも厳密一致することを確認する。
 
 gate2(0<z<50000) は両経路とも適用しない（runner 表示側の責務）。深度精度ではなく
@@ -49,13 +49,15 @@ def load_fixture():
 
 
 def evaluate_core_depthmap(frame, params):
-    """Path B: evaluate.py の core 手順（split → disparity → gate1 → compute_depth）を
+    """Path B: evaluate.py の core 手順（split → disparity → gate1 → 推論帯 → compute_depth）を
     pipeline.py を経由せず独立に再現し、集計前の depth マップを返す（gate2 は適用しない）。
     """
     blue, _, red = cv2.split(frame)
     disp = calcDisparityByZNCC(red, blue,
                                config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
-    disp[np.abs(disp) > config.DISP_MAX] = np.nan
+    disp[np.abs(disp) > config.DISP_MAX] = np.nan                                       # gate1
+    abs_disp = np.abs(disp)                                                              # 推論帯（2026-09-18）
+    disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
     return compute_depth(
         disp,
         params.v_pos, params.u_pos, params.a_pos, params.w_pos,
