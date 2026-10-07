@@ -34,3 +34,5 @@ data/test/*
 !data/test/.gitkeep
 outputs/*
 !outputs/.gitkeep
+data/calib_imgs_*/
+params/archive_*/
