@@ -207,6 +207,49 @@ def test_calib_raw_cache_matches_processed_png_at_default_size(tmp_path):
         ensure_calib_disparity_from_raw(s, bad, root=tmp_path / "out_bad")   # 別キャッシュ（既存 npy の再利用を避ける）
 
 
+# ---------- キャッシュの入力識別（2026-10-30 監査 REUSE-001） ----------
+
+def test_cache_root_uses_identity_checked_namespace(tmp_path):
+    """識別つきの置き場は cache/disp_v2/。入力を識別しない旧 cache/disp/ は読まない。"""
+    s = DispSettings()
+    assert cache_root(s, tmp_path) == tmp_path / "cache" / "disp_v2" / s.key()
+    assert cache_root(s).parent.name == "disp_v2"
+
+
+def test_calib_cache_rejects_same_name_from_another_campaign(tmp_path):
+    """別キャンペーンの同名 2000.png に、先に作った視差を返さない（以前は無警告で返していた）。"""
+    s = DispSettings()
+    camp_a, camp_b = tmp_path / "campaign_a", tmp_path / "campaign_b"
+    for d, seed in ((camp_a, 1), (camp_b, 2)):
+        d.mkdir()
+        cv2.imwrite(str(d / "2000.png"), np.random.default_rng(seed).integers(0, 256, size=(H, W, 3), dtype=np.uint8))
+    root = tmp_path / "out"
+    first = ensure_calib_disparity(s, camp_a, root=root)[2000]
+    with pytest.raises(ValueError, match="一致しません"):
+        ensure_calib_disparity(s, camp_b, root=root)
+    assert ensure_calib_disparity(s, camp_a, root=root)[2000] == first      # 同じ入力は再利用
+    again = ensure_calib_disparity(s, camp_b, root=root, overwrite=True)[2000]
+    expected = disparity_of_proc(calib_image_to_proc(cv2.imread(str(camp_b / "2000.png")), s.image_size), s)
+    np.testing.assert_array_equal(np.load(str(again)), expected)          # overwrite を明示すれば計算し直す
+
+
+def test_capture_cache_detects_replaced_frame_and_missing_identity(tmp_path):
+    """同じ dir で中身を差し替えた画像と、識別の無い npy（旧形式の写し等）は使わない。"""
+    cap = tmp_path / "captures" / "dist_2000"
+    cap.mkdir(parents=True)
+    cv2.imwrite(str(cap / "000000.png"), _raw())
+    s = DispSettings()
+    root = tmp_path / "out"
+    frames = list_frames(cap)
+    (dst,) = ensure_capture_disparity(s, "dist_2000", frames, root=root)
+    cv2.imwrite(str(cap / "000000.png"), _raw())                          # 同じ名前のまま中身だけ差し替え
+    with pytest.raises(ValueError, match="一致しません"):
+        ensure_capture_disparity(s, "dist_2000", frames, root=root)
+    dst.with_suffix(".json").unlink()
+    with pytest.raises(ValueError, match="識別情報がありません"):
+        ensure_capture_disparity(s, "dist_2000", frames, root=root)
+
+
 # ---------- 校正 ----------
 
 TRUE = DepthParams(v_pos=426000.0, u_pos=-61.0, a_pos=-26.4, w_pos=0.0,

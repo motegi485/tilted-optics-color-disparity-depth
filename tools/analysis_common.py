@@ -5,9 +5,12 @@
 
 1. 視差キャッシュ: 設定（K・S・T・処理解像度）ごとに、保存 PNG（校正画像 `data/calib_imgs/<距離>.png`・
    校正 raw `data/calib_raw/<距離>.png`・評価 raw `data/captures/<session>/<idx>.png`）から視差マップを 1 回だけ計算して
-   `outputs/cache/disp/<設定キー>/...npy` に置く。校正帯・RANSAC・推論ゲートの探索は視差を変えないので、
+   `outputs/cache/disp_v2/<設定キー>/...npy` に置く。校正帯・RANSAC・推論ゲートの探索は視差を変えないので、
    キャッシュを読むだけで何百通りでも回せる。保存する視差は **gate1 前の生値**（gate は評価側で適用する）。
    処理解像度を変える実験（B3）は raw から `preprocess_to` で作り直し、K・S を `scaled_settings` で解像度比にスケールする。
+   各 npy の横に入力の識別（`<名前>.json`: 入力画像の SHA-256・種別・設定・前処理・ネイティブ版）を置き、再利用の前に
+   照合する。一致しない・識別が無いものは使わずに ValueError で止める（2026-10-30 監査 REUSE-001。それ以前の
+   `outputs/cache/disp/` は鍵が設定と名前だけで入力を識別しないので読まない。消しもしない）。
 2. 校正の純関数 `calibrate_from_disparity`: 「視差マップ群 → 点抽出（`calibration.calibrate.extract_sign_points`）→
    RANSAC（`calibration.calibrate.ransac_fit_line`）→ 切片 → 参照式 curve_fit（`calibration.fit_params.model`）→
    DepthParams」を、`calibrate.py`／`fit_params.py` の main と同じ手順・同じ既定値で、ファイル I/O と print なしに行う。
@@ -27,6 +30,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import datetime as dt
+import hashlib
+import json
 import math
 from dataclasses import dataclass, field
 
@@ -41,6 +47,9 @@ from checks.evaluate_distance_accuracy import summarize_errors
 from core.depth import compute_depth
 from core.disparity import calcDisparityByZNCC
 from core.params import DepthParams
+import _rt_disparity_native   # キャッシュの識別にネイティブ版を記録するため（未導入なら上の core.disparity が案内つきで止める）
+
+CACHE_DIR_NAME = "disp_v2"     # 入力識別つきの視差キャッシュの置き場（outputs/cache/<これ>/<設定キー>/）
 
 
 # ===== 設定 =====
@@ -159,7 +168,60 @@ def edge_strength_of_proc(proc_bgr: np.ndarray) -> np.ndarray:
 # ===== 視差キャッシュ =====
 
 def cache_root(settings: DispSettings, root: Path | None = None) -> Path:
-    return (Path(root) if root is not None else Path(config.OUTPUTS_DIR)) / "cache" / "disp" / settings.key()
+    return (Path(root) if root is not None else Path(config.OUTPUTS_DIR)) / "cache" / CACHE_DIR_NAME / settings.key()
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _cache_identity(src: Path, kind: str, settings: DispSettings) -> dict:
+    """視差キャッシュの入力識別。これが一致しない npy は再利用しない（元パスは含めない＝同じ内容なら置き場所は問わない）。
+
+    kind: "capture"（評価 raw）・"calib_raw"（校正 raw）は preprocess_to、"calib"（処理済み校正画像）は calib_image_to_proc。
+    """
+    if kind == "calib":
+        prep = {"func": "calib_image_to_proc", "resize": "cv2.resize 既定補間"}
+    else:
+        prep = {"func": "preprocess_to", "native_size": list(config.WEBCAM_NATIVE_SIZE),
+                "crop_w": int(config.WEBCAM_CROP_W), "resize": "INTER_AREA"}
+    return {"kind": kind, "source_sha256": _sha256(src),
+            "settings": {"kernel_size": settings.kernel_size, "search_range_x": settings.search_range_x,
+                         "edge_th": settings.edge_th, "image_size": list(settings.image_size)},
+            "preprocess": prep, "native_version": getattr(_rt_disparity_native, "__version__", "unknown")}
+
+
+def _ensure_cached(dst: Path, src: Path, kind: str, settings: DispSettings, overwrite: bool, who: str) -> Path:
+    """src の視差を dst（npy）に用意し、横に入力識別 `dst.json` を置く。
+
+    既存の npy は識別が現在の入力と一致するときだけ再利用する。識別が無い・一致しないときは使わずに ValueError
+    （同じ名前の別の入力や、同じ dir で差し替えた画像の古い視差を無警告で返さない・2026-10-30 監査 REUSE-001）。
+    overwrite=True なら計算し直して npy と識別を書き直す。
+    """
+    meta = dst.with_suffix(".json")
+    ident = _cache_identity(src, kind, settings)
+    if overwrite or not dst.exists():
+        img = cv2.imread(str(src))
+        if img is None:
+            raise ValueError(f"{who}: 画像を読めません: {src}")
+        proc = calib_image_to_proc(img, settings.image_size) if kind == "calib" else preprocess_to(img, settings.image_size)
+        np.save(str(dst), disparity_of_proc(proc, settings))
+        meta.write_text(json.dumps({**ident, "source": str(src), "created_utc": dt.datetime.now(dt.timezone.utc).isoformat()},
+                                   ensure_ascii=False, indent=1), encoding="utf-8")
+        return dst
+    if not meta.is_file():
+        raise ValueError(f"{who}: 視差キャッシュに入力の識別情報がありません: {dst}。"
+                         "--cache-root に新しい置き場を指定するか overwrite=True で計算し直してください")
+    saved = json.loads(meta.read_text(encoding="utf-8"))
+    mismatch = sorted(k for k in ident if saved.get(k) != ident[k])
+    if mismatch:
+        raise ValueError(f"{who}: 視差キャッシュの入力が現在の入力と一致しません（{', '.join(mismatch)}）: {dst} ← {src}。"
+                         "入力を差し替えたときは --cache-root に新しい置き場を指定するか overwrite=True で計算し直してください")
+    return dst
 
 
 def list_frames(cap_dir: Path, *, skip_first: int = 0, max_frames: int | None = None, step: int = 1) -> list[Path]:
@@ -175,24 +237,21 @@ def list_frames(cap_dir: Path, *, skip_first: int = 0, max_frames: int | None = 
 
 def ensure_capture_disparity(settings: DispSettings, session: str, frames: list[Path], *,
                              root: Path | None = None, overwrite: bool = False) -> list[Path]:
-    """評価 raw PNG → preprocess_to → 視差 → `<cache>/<session>/<idx>.npy`。既存はスキップ（overwrite で再計算）。"""
+    """評価 raw PNG → preprocess_to → 視差 → `<cache>/<session>/<idx>.npy`。既存は入力識別が一致すれば再利用
+    （不一致・識別なしは ValueError。overwrite で再計算）。"""
     out_dir = cache_root(settings, root) / session
     out_dir.mkdir(parents=True, exist_ok=True)
-    outs: list[Path] = []
-    for p in frames:
-        dst = out_dir / f"{p.stem}.npy"
-        if overwrite or not dst.exists():
-            raw = cv2.imread(str(p))
-            if raw is None:
-                raise ValueError(f"ensure_capture_disparity: png を読めません: {p}")
-            np.save(str(dst), disparity_of_proc(preprocess_to(raw, settings.image_size), settings))
-        outs.append(dst)
-    return outs
+    return [_ensure_cached(out_dir / f"{p.stem}.npy", p, "capture", settings, overwrite, "ensure_capture_disparity")
+            for p in frames]
 
 
 def ensure_calib_disparity(settings: DispSettings, calib_dir: Path, *,
                            root: Path | None = None, overwrite: bool = False) -> dict[int, Path]:
-    """校正画像（距離名 .png/.jpg）→ calib_image_to_proc → 視差 → `<cache>/calib/<距離>.npy`。戻り値は距離 → npy。"""
+    """校正画像（距離名 .png/.jpg）→ calib_image_to_proc → 視差 → `<cache>/calib/<距離>.npy`。戻り値は距離 → npy。
+
+    鍵は距離名なので、別の dir（別キャンペーン）の同名画像や、同じ dir で差し替えた画像は入力識別の照合で ValueError に
+    なる（以前は先に作った視差を無警告で返していた）。キャンペーンを切り替えるときは --cache-root を分ける。
+    """
     calib_dir = Path(calib_dir)
     paths = sorted(p for p in calib_dir.iterdir() if p.suffix.lower() in (".png", ".jpg", ".jpeg") and p.stem.isdigit())
     if not paths:
@@ -204,13 +263,7 @@ def ensure_calib_disparity(settings: DispSettings, calib_dir: Path, *,
         depth = int(p.stem)
         if depth in outs:
             raise ValueError(f"ensure_calib_disparity: 同一距離の校正画像が重複: {depth}")
-        dst = out_dir / f"{depth}.npy"
-        if overwrite or not dst.exists():
-            image = cv2.imread(str(p))
-            if image is None:
-                raise ValueError(f"ensure_calib_disparity: 画像を読めません: {p}")
-            np.save(str(dst), disparity_of_proc(calib_image_to_proc(image, settings.image_size), settings))
-        outs[depth] = dst
+        outs[depth] = _ensure_cached(out_dir / f"{depth}.npy", p, "calib", settings, overwrite, "ensure_calib_disparity")
     return outs
 
 
@@ -222,7 +275,7 @@ def ensure_calib_disparity_from_raw(settings: DispSettings, raw_dir: Path, *, di
     処理済み PNG 用の `ensure_calib_disparity`（`calib/`）とはキャッシュ名を分ける。既定解像度では
     `preprocess_to(raw, IMAGE_SIZE) == camera.preprocess(raw)` なので、同じ撮影の処理済み PNG から作った視差とビット一致する
     （テストで保証）。`distances` を渡すとその距離だけ処理し、raw が無い距離があれば FileNotFoundError にする
-    （校正距離のサブセット比較で意図しない欠落を防ぐ）。
+    （校正距離のサブセット比較で意図しない欠落を防ぐ）。既存の扱い（入力識別の照合）は ensure_calib_disparity と同じ。
     """
     raw_dir = Path(raw_dir)
     if not raw_dir.is_dir():
@@ -240,16 +293,9 @@ def ensure_calib_disparity_from_raw(settings: DispSettings, raw_dir: Path, *, di
         found = {d: found[d] for d in wanted}
     out_dir = cache_root(settings, root) / "calib_raw"
     out_dir.mkdir(parents=True, exist_ok=True)
-    outs: dict[int, Path] = {}
-    for depth in sorted(found):
-        dst = out_dir / f"{depth}.npy"
-        if overwrite or not dst.exists():
-            raw = cv2.imread(str(found[depth]))
-            if raw is None:
-                raise ValueError(f"ensure_calib_disparity_from_raw: png を読めません: {found[depth]}")
-            np.save(str(dst), disparity_of_proc(preprocess_to(raw, settings.image_size), settings))
-        outs[depth] = dst
-    return outs
+    return {depth: _ensure_cached(out_dir / f"{depth}.npy", found[depth], "calib_raw", settings, overwrite,
+                                  "ensure_calib_disparity_from_raw")
+            for depth in sorted(found)}
 
 
 def load_stack(paths: list[Path]) -> np.ndarray:

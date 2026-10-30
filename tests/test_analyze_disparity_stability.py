@@ -105,7 +105,8 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     assert (out / "by_edge.csv").exists()
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["frames_used"] == {"dist_2000": 3} and summary["settings"]["key"] == common.DispSettings().key()
-    assert (tmp_path / "cache" / "cache" / "disp" / common.DispSettings().key() / "dist_2000" / "000000.npy").exists()
+    cached = common.cache_root(common.DispSettings(), tmp_path / "cache") / "dist_2000" / "000000.npy"
+    assert cached.exists() and cached.with_suffix(".json").exists()      # 入力識別つき（2026-10-30 監査 REUSE-001）
     assert main(["--sessions", "dist_9999", "--captures-dir", str(tmp_path / "captures"),
                  "--cache-root", str(tmp_path / "cache"), "--no-plots"]) == 2
     assert main(["--sessions", "dist_2000", "--min-valid-frac", "0", "--captures-dir", str(tmp_path / "captures")]) == 2
