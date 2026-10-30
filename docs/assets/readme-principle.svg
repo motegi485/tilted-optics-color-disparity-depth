@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="380" viewBox="0 0 1100 380" role="img" aria-labelledby="title desc">
+<title id="title">通常の光学系とアオリ光学系</title>
+<desc id="desc">通常の光学系はセンサ・レンズ・合焦面が平行。アオリ光学系はレンズが傾き、合焦面と被写界深度も傾く。平らな被写体の高さによって合焦面からの隔たりが変わる。寸法・角度は模式的。</desc>
+<defs>
+<linearGradient id="glass" x1="0" x2="1"><stop stop-color="#89aec4"/><stop offset=".4" stop-color="#ecf7fc"/><stop offset="1" stop-color="#a9c8da"/></linearGradient>
+<linearGradient id="sensor" x1="0" x2="1"><stop stop-color="#35495b"/><stop offset=".5" stop-color="#71899d"/><stop offset="1" stop-color="#35495b"/></linearGradient>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#748391"/></marker>
+</defs>
+<rect width="1100" height="380" fill="white"/>
+<style>text{font-family:'Yu Gothic',Meiryo,sans-serif;font-size:18px;fill:#253848} .heading{font-size:23px;font-weight:700}.label{font-size:16px}.plane{stroke:#278e7c;stroke-width:3;fill:none}.axis{stroke:#748391;stroke-width:1.4;fill:none;marker-end:url(#arrow)}</style>
+<text x="190" y="38" class="heading">通常の光学系</text>
+<text x="740" y="38" class="heading">アオリ光学系</text>
+<path d="M550 65V340" stroke="#dce4e9"/>
+<!-- 通常配置：センサ面・レンズ主面・合焦面は平行 -->
+<rect x="48" y="125" width="27" height="160" rx="3" fill="#e0e7ec" stroke="#899aa7"/>
+<rect x="69" y="130" width="7" height="150" fill="url(#sensor)"/>
+<ellipse cx="168" cy="197" rx="14.5" ry="81" fill="url(#glass)" stroke="#4e6d80" stroke-width="2"/>
+<path d="M168 85V310" stroke="#7e96a6" stroke-dasharray="5 5"/>
+<rect x="349" y="100" width="110" height="200" fill="#b8dcd1" fill-opacity=".45" stroke="#72ad9e" stroke-dasharray="4 4"/>
+<rect x="394" y="95" width="22" height="210" fill="#878c93" fill-opacity=".55" stroke="#626d77"/>
+<path d="M405 95V305" class="plane"/>
+<path d="M62 320H500" class="axis"/>
+<text x="37" y="110" class="label">センサ</text><text x="140" y="103" class="label">レンズ</text>
+<text x="380" y="78" class="label">被写体</text><text x="382" y="343" class="label">合焦面</text>
+<path d="M349 89H459" stroke="#72ad9e"/><text x="270" y="81" class="label">被写界深度</text>
+<!-- アオリ配置：三面の延長が共通点へ。被写界深度はくさび状。 -->
+<rect x="598" y="125" width="27" height="160" rx="3" fill="#e0e7ec" stroke="#899aa7"/>
+<rect x="619" y="130" width="7" height="150" fill="url(#sensor)"/>
+<path d="M623 300L811 112" stroke="#7e96a6" stroke-dasharray="5 5"/>
+<path d="M623 280V320" stroke="#7e96a6" stroke-dasharray="5 5"/>
+<g transform="translate(729 194) rotate(45)"><ellipse cx="0" cy="0" rx="13.5" ry="77" fill="url(#glass)" stroke="#4e6d80" stroke-width="2"/></g>
+<path d="M623 300L1057 172V269Z" fill="#b8dcd1" fill-opacity=".45" stroke="#72ad9e" stroke-dasharray="4 4"/>
+<rect x="948" y="95" width="22" height="210" fill="#878c93" fill-opacity=".55" stroke="#626d77"/>
+<path d="M623 300L1057 221" class="plane"/>
+<path d="M612 320H1060" class="axis"/>
+<text x="587" y="110" class="label">センサ</text><text x="736" y="118" class="label">レンズ</text>
+<text x="931" y="78" class="label">被写体</text><text x="982" y="213" class="label">合焦面</text>
+<text x="928" y="150" class="label">被写界深度</text>
+<path d="M1015 155L1030 180" stroke="#72ad9e"/>
+</svg>
