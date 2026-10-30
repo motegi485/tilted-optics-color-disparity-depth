@@ -481,6 +481,8 @@ def run(
     「取得スレッド停止 → join → source release → ウィンドウ破棄」を必ず通す。`with` の __enter__ が
     raise した場合 __exit__ は呼ばれないが、source 側（camera.py）が掴んだハンドルを自前で release
     する規約なので、ここでは外側 finally でウィンドウ破棄のみ保証すればよい。
+    録画中に raw PNG・viz PNG の書き込みが失敗したら RuntimeError で止める（npy は raw PNG の保存に
+    成功したフレームにだけ書くので、raw の欠けた npy は残らない）。
 
     params_path: 録画セッションの meta.json（B-6）に記録する起動時の --params 文字列（任意）。
     record_video: セッション全長の閲覧用動画（raw/depth・docs/module-realtime.md）を録画するか。既定 False（オプトイン）。
@@ -543,10 +545,18 @@ def run(
 
                     if record:                         # 消費フレームのみ保存（raw->captures, depth->outputs）
                         idx = processed
-                        cv2.imwrite(str(captures_dir / f"{idx:06d}.png"), raw)   # 可逆PNG（既定圧縮・docs/requirements-and-status.md の canonical）
+                        # cv2.imwrite は書込み失敗（ディスク不足・権限・開けないパス等）を例外ではなく False で返す
+                        # （OpenCV 4.13 で確認）。戻り値を捨てると raw の欠けた npy が残り、再生照合からも漏れるため、
+                        # npy を書く前に止める（2026-10-30 監査 IMPL-001・capture_calib.save_calib_png と同じ扱い）。
+                        png_path = captures_dir / f"{idx:06d}.png"
+                        if not cv2.imwrite(str(png_path), raw):   # 可逆PNG（既定圧縮・docs/requirements-and-status.md の canonical）
+                            raise RuntimeError(
+                                f"runner: raw PNG の書き込みに失敗しました: {png_path}（このフレームの depth npy は保存していません）")
                         np.save(str(outputs_dir / f"{idx:06d}.npy"), depth)      # NaN 保持の float32 を厳密保存
                         if save_viz:
-                            cv2.imwrite(str(outputs_dir / f"{idx:06d}_viz.png"), color)  # HUD 無しのクリーン viz
+                            viz_path = outputs_dir / f"{idx:06d}_viz.png"
+                            if not cv2.imwrite(str(viz_path), color):      # HUD 無しのクリーン viz
+                                raise RuntimeError(f"runner: viz PNG の書き込みに失敗しました: {viz_path}")
 
                     inst_fps = (1.0 / dt) if dt > 0 else float("inf")
                     ema_fps = inst_fps if ema_fps is None else 0.9 * ema_fps + 0.1 * inst_fps

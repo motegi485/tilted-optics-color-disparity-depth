@@ -1,12 +1,13 @@
 """realtime/runner.py の HW 非依存テスト（合成 numpy 配列・tmp_path のみ）。"""
 import json
 
+import cv2
 import numpy as np
 import pytest
 
 import config
 from core.params import DepthParams
-from realtime.camera import StillImageSource
+from realtime.camera import FrameSource, StillImageSource
 from realtime.runner import (
     _ensure_session_dirs,
     _LatestFrameSlot,
@@ -15,6 +16,7 @@ from realtime.runner import (
     _SessionVideoRecorder,
     _write_session_meta,
     draw_colorbar,
+    run,
     to_colormap,
 )
 
@@ -398,3 +400,66 @@ def test_write_session_meta_records_session_video_enabled_details(tmp_path, monk
         "enabled": True, "fps": 15.0, "fourcc": "mp4v",
         "raw": "video_raw.mp4", "depth": "video_depth.mp4",
     }
+
+
+# ===== run: 録画の保存失敗（2026-10-30 監査 IMPL-001） =====
+
+class _OneFrameSource(FrameSource):
+    """raw を 1 枚だけ返して EOF になる最小 source（実カメラ・実ファイル無し）。"""
+
+    def __init__(self):
+        self._n = 0
+
+    def open(self) -> None:
+        pass
+
+    def read(self):
+        if self._n >= 1:
+            return False, None
+        self._n += 1
+        return True, np.zeros((*reversed(config.WEBCAM_NATIVE_SIZE), 3), dtype=np.uint8)
+
+    def release(self) -> None:
+        pass
+
+
+def _run_one_frame(tmp_path, monkeypatch, fail_when=None):
+    """GUI だけ無害化して run を 1 フレーム回す。fail_when(path) が真の書込みだけ imwrite が False を返す。"""
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+    monkeypatch.setattr(cv2, "imshow", lambda *a, **k: None)
+    monkeypatch.setattr(cv2, "waitKey", lambda *a, **k: -1)
+    monkeypatch.setattr(cv2, "destroyAllWindows", lambda *a, **k: None)
+    real_imwrite = cv2.imwrite
+
+    def imwrite(path, img, *args):
+        if fail_when is not None and fail_when(str(path)):
+            return False                                # OpenCV は書込み失敗を例外でなく False で返す
+        return real_imwrite(path, img, *args)
+
+    monkeypatch.setattr(cv2, "imwrite", imwrite)
+    run(_OneFrameSource(), _dummy_params(), record=True, save_viz=True, session="s", log_every=0)
+    return tmp_path / "captures" / "s", tmp_path / "outputs" / "s"
+
+
+def test_run_saves_raw_png_depth_npy_and_viz(tmp_path, monkeypatch):
+    captures, outputs = _run_one_frame(tmp_path, monkeypatch)
+
+    assert (captures / "000000.png").is_file()
+    assert (outputs / "000000_viz.png").is_file()
+    assert np.load(str(outputs / "000000.npy")).dtype == np.float32
+
+
+def test_run_raises_without_saving_npy_when_raw_png_write_fails(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="raw PNG"):
+        _run_one_frame(tmp_path, monkeypatch, fail_when=lambda p: p.startswith(str(tmp_path / "captures")))
+
+    assert list((tmp_path / "outputs" / "s").glob("*.npy")) == []   # raw の欠けた npy を残さない
+
+
+def test_run_raises_when_viz_write_fails(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="viz PNG"):
+        _run_one_frame(tmp_path, monkeypatch, fail_when=lambda p: p.endswith("_viz.png"))
+
+    assert (tmp_path / "captures" / "s" / "000000.png").is_file()   # canonical な raw と npy は保存済み
+    assert (tmp_path / "outputs" / "s" / "000000.npy").is_file()

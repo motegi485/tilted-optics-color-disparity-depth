@@ -4,6 +4,7 @@
 captures/{session}/{i}.png を preprocess -> process_frame で再計算した depth が、
 全フレームで NaN 位置＋有限値ともビット一致するかを照合する。
 
+PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える・2026-10-30 監査 IMPL-001）。
 preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化なので、再計算 depth は
 ライブ depth とビット一致するはず。一致＝録画→再生の経路が無劣化で、ライブ結果が保存
 クリップから完全再現可能(高速化段階の Python<->Rust 照合〈docs/verification-and-tools.md〉の土台)であることの回帰確認。
@@ -97,6 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     if not pngs:
         print(f"[ERROR] {cap_dir} に連番 png(??????.png)がありません")
         return 2
+    # 逆方向の照合: raw PNG の無い npy は PNG だけを列挙すると母数から漏れ、残りのフレームだけで
+    # 「全フレーム一致」になってしまう（2026-10-30 監査 IMPL-001）。片方しか無い連番も不一致に数える。
+    png_stems = {p.stem for p in pngs}
+    orphan_npys = sorted(p for p in out_dir.glob("??????.npy") if p.stem.isdigit() and p.stem not in png_stems)
 
     if args.params is not None:
         params_path = args.params
@@ -140,7 +145,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[FAIL] {idx}: {msg}")
             first_fail = first_fail or idx
 
-    total = len(pngs)
+    for npy in orphan_npys:
+        print(f"[FAIL] {npy.stem}: 対応する raw png がありません ({cap_dir / f'{npy.stem}.png'})")
+    if orphan_npys and (first_fail is None or orphan_npys[0].stem < first_fail):
+        first_fail = orphan_npys[0].stem
+
+    total = len(pngs) + len(orphan_npys)
     print(f"\n結果: {n_ok}/{total} フレーム一致")
     if n_ok == total:
         print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= docs/requirements-and-status.md のクリップ再生・再現一致 達成")
