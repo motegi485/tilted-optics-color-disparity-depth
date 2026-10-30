@@ -56,7 +56,8 @@ def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
     多数決ではなく幾何的コンセンサス(共線インライヤ最大化)で本物の直線を拾うため、
     散らばったスプリアス誤マッチが多くても頑健。
     戻り値: a(傾き), b(切片=zero_disp=視差0のy座標), inlier_mask。
-    コンセンサス不成立時は RANSACRegressor が ValueError を送出する。
+    コンセンサス不成立時は RANSACRegressor が ValueError を送出する。入力全体または最終インライヤの
+    視差が1種類しかなく傾きを同定できない場合も ValueError を送出する。
     """
     # 点数だけでは傾きの同定性を保証できない: d が全て同値だと設計行列 [d, 1] の階数が1に
     # なり、a は非同定のまま任意の値が返りうる（RANSAC_MIN_POINTS は階数を保証しない）。
@@ -71,6 +72,14 @@ def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
     est = RANSACRegressor(residual_threshold=residual_threshold,
                           random_state=random_state)
     est.fit(X, row_vals)
+    # 入力全体の一意値が2以上でも、最終インライヤが同じ視差だけで占められると [d, 1] の階数は1のままで、
+    # 再フィットの傾きは同定できない（最小ノルム解の a=0 と行の平均が無警告で返る）。上と同じ基準を
+    # 最終コンセンサスにも課す（2026-10-30 監査 IMPL-002。閾値は追加しない）。
+    n_unique_inlier = int(np.unique(d_vals[est.inlier_mask_]).size)
+    if n_unique_inlier < 2:
+        raise ValueError(
+            f"RANSAC の最終インライヤの視差の一意値が {n_unique_inlier} 個しかなく、直線の傾き a を同定できません"
+            f"（インライヤ {int(est.inlier_mask_.sum())} 点）")
     a = float(est.estimator_.coef_[0])         # 最終インライヤで再フィットした直線の傾き
     b = float(est.estimator_.intercept_)       # 切片 = zero_disp(fit_params.py の核心入力)
     return a, b, est.inlier_mask_

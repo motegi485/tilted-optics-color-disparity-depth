@@ -118,6 +118,57 @@ def test_calc_disparity_known_shift(shift, calc_fn):
     assert np.all(np.abs(vals - shift) < 0.1), f"d が shift={shift} から乖離: {vals}"
 
 
+# ===== calcDisparityByZNCC: 入力のメモリ配置（2026-10-30 監査 IMPL-003） =====
+
+def _textured_pair(h: int = 60, w: int = 120, shift: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    """行ごとに異なる乱数テクスチャと、それを水平に shift ずらした青（配置を取り違えると結果が変わる入力）。"""
+    red = np.random.default_rng(20261030).integers(0, 256, size=(h, w), dtype=np.uint8)
+    return red, np.roll(red, shift, axis=1)
+
+
+def _non_c_layouts(img: np.ndarray) -> dict[str, np.ndarray]:
+    """同じ論理画素値を持つ C 連続でない配列（F 連続・転置 view・非連続 view）。"""
+    big = np.zeros((img.shape[0] * 2, img.shape[1] * 2), dtype=np.uint8)
+    big[::2, ::2] = img
+    return {"fortran": np.asfortranarray(img),
+            "transposed_view": np.ascontiguousarray(img.T).T,
+            "strided_view": big[::2, ::2]}
+
+
+@pytest.mark.parametrize("calc_fn", _IMPLS)
+def test_calc_disparity_independent_of_memory_layout(calc_fn):
+    """F 連続入力を Rust 側が行優先と誤読して別の視差を返していた（NaN 位置・値とも不一致）。"""
+    red, blue = _textured_pair()
+    ref = calc_fn(red, blue, K, S, TH)
+    assert int(np.count_nonzero(~np.isnan(ref))) > 0
+    reds, blues = _non_c_layouts(red), _non_c_layouts(blue)
+    for name in reds:
+        assert np.array_equal(reds[name], red) and not reds[name].flags.c_contiguous
+        got = calc_fn(reds[name], blues[name], K, S, TH)
+        assert np.array_equal(np.isnan(got), np.isnan(ref)), name
+        assert np.array_equal(got[~np.isnan(got)], ref[~np.isnan(ref)]), name
+
+
+def test_calc_disparity_wrapper_passes_c_contiguous_input_without_copy(monkeypatch):
+    """本番経路の C 連続入力（cv2.split の出力）はそのままネイティブへ渡る。F 連続は C 連続のコピーにして渡す。"""
+    import core.disparity as wrapper
+    seen = []
+
+    class _FakeNative:
+        @staticmethod
+        def calc_disparity_by_zncc(red, blue, *args):
+            seen.append((red, blue))
+            return np.full(red.shape, np.nan, dtype=np.float32)
+
+    monkeypatch.setattr(wrapper, "_native", _FakeNative)
+    red, blue = _textured_pair()
+    calc_rust(red, blue, K, S, TH)
+    assert seen[-1][0] is red and seen[-1][1] is blue
+    calc_rust(np.asfortranarray(red), np.asfortranarray(blue), K, S, TH)
+    assert all(a.flags.c_contiguous for a in seen[-1])
+    assert np.array_equal(seen[-1][0], red) and np.array_equal(seen[-1][1], blue)
+
+
 # ===== calcDisparityByZNCC: C-1 タイ・プラトー → NaN =====
 
 @pytest.mark.parametrize("calc_fn", _IMPLS)

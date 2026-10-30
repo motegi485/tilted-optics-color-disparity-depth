@@ -90,6 +90,15 @@ def test_ransac_fit_line_single_unique_value_raises():
         calibrate.ransac_fit_line(d_vals, row_vals, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
 
 
+def test_ransac_fit_line_degenerate_final_inliers_raises():
+    """入力全体の一意値は3（入口のガードは通る）でも、最終インライヤが視差 3.0 の 60 点だけになると
+    傾きを同定できない。以前は a=0・b=行の平均を無警告で返していた（2026-10-30 監査 IMPL-002）。"""
+    d_vals = np.array([3.0] * 60 + [4.0, 6.5])
+    row_vals = np.array([120.0] * 60 + [40.0, 330.0])
+    with pytest.raises(ValueError, match="最終インライヤ"):
+        calibrate.ransac_fit_line(d_vals, row_vals, config.RANSAC_RESIDUAL_TH, config.RANSAC_RANDOM_STATE)
+
+
 def test_ransac_fit_line_fits_known_line():
     """雑音なしの厳密な直線 row=a*d+b を与えると、a・b・inlier_mask がそれを再現する。"""
     d_vals = np.linspace(1.0, 10.0, 40)

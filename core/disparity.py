@@ -5,7 +5,7 @@
 ここで検証し、既存呼び出し元との ValueError 契約（docs/known-issues.md のリスク#10）を維持する
 （PyO3側の型抽出失敗は ValueError ではなく TypeError/OverflowError になるため、
 検証はネイティブ拡張呼び出しの前に済ませる。red/blue の形状不一致のみネイティブ側の
-防御チェックが ValueError を出す）。
+防御チェックが ValueError を出す）。入力のメモリ配置は問わず、ネイティブへは C 連続にそろえて渡す。
 
 Python参照実装は core/_disparity_reference.py に凍結保存されている
 （docs/verification-and-tools.md に記載の Rust↔Python 照合・checks/bench_disparity.py の速度比較・checks/verify_disparity_rust.py
@@ -65,6 +65,12 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
         raise ValueError(f"kernel_size は奇数である必要があります（渡された値: {kernel_size}）")
     if search_range_x % 2 == 0:
         raise ValueError(f"search_range_x は奇数である必要があります（渡された値: {search_range_x}）")
+
+    # Rust 側は連続配列の生バッファを行優先 (y*w+x) で読む。F 連続（np.asfortranarray・転置 view 等）を
+    # そのまま渡すと列優先のバッファを行優先と誤読し、画素配置の違う視差を無警告で返す（2026-10-30 監査
+    # IMPL-003）。C 連続の入力（cv2.split の出力など）は同じオブジェクトが返るのでコピーは起きない。
+    red_img = np.ascontiguousarray(red_img)
+    blue_img = np.ascontiguousarray(blue_img)
 
     return _native.calc_disparity_by_zncc(
         red_img, blue_img, kernel_size, search_range_x, float(th_value), True)
