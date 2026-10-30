@@ -37,8 +37,9 @@ from core.disparity import calcDisparityByZNCC
 # ===== 本スクリプト固有の定数（config に対応値が無いもの） =====
 DEFAULT_BURST_N = 32          # バースト枚数の既定値（CLI --n で可変）
 # バースト1回あたりの経過時間上限（秒）。フィードが固着（同一フレーム連発）した場合に
-# 無限ループせず「異常」として打ち切るための安全弁。source.read() のブロッキング挙動や
-# np.array_equal の比較コスト・実 fps に依存しない time.monotonic() ベースの時間予算とする。
+# 無限ループせず「異常」として打ち切るための安全弁。np.array_equal の比較コストや実 fps に依存しない
+# time.monotonic() ベースの時間予算とする。判定は各 read の前に行うので、read 自体の所要時間は
+# 打ち切れない（read が有限時間で戻る前提。read が戻らない固着は検出できない・2026-10-30 監査 IMPL-005）。
 # 目安: ~4fps 相当の控えめな前提でも DEFAULT_BURST_N(32) 枚は 8s 以内に揃う
 # （実 30fps なら約1.1s）。--n を増やしても破綻しない十分な安全弁として 8.0 を採用。
 # config.LIVE_WAIT_TIMEOUT_S（open 時のライブ待ち）とは別概念・独立。

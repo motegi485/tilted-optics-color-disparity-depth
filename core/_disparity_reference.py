@@ -106,7 +106,8 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
                 continue  # NaN のまま
 
             denominator = 4 * sim_peak - 2 * sim_neg - 2 * sim_pos
-            # 放物線が上に凸（denominator > 0）かつ補正量 ≤ 0.5px のときのみ適用
+            # 放物線が上に凸（denominator > 0）かつ |sim_pos - sim_neg| <= denominator（補正量 |δ| <= 1 に相当）のときのみ適用。
+            # 上の厳密局所最大の下では |δ| < 0.5 が代数的に成り立つので、このガードは主に float32 の桁落ち対策（docs/module-core.md）
             if denominator > 0 and abs(sim_pos - sim_neg) <= denominator:
                 subpixel = (sim_pos - sim_neg) / denominator
             else:
