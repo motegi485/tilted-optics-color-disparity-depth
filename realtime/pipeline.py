@@ -6,7 +6,7 @@ ZNCC → gate1(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=IN
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
 core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<50000) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の
-ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・リスク#10）。
+ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・docs/known-issues.md #10）。
 """
 import cv2
 import numpy as np

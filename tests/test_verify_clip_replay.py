@@ -83,3 +83,33 @@ def test_main_fails_on_npy_without_raw_png(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "000000: 対応する raw png がありません" in out
     assert "1/2 フレーム一致" in out
+
+
+# ===== main: 録画時の条件との食い違いの警告（2026-11-02 追加・判定は変えない） =====
+
+def test_main_warns_when_recorded_config_differs(tmp_path, monkeypatch, capsys):
+    """meta.json の config が現行と違えば [WARN] で知らせる（旧設定セッションの不一致を回帰と誤読しない）。"""
+    _make_session(tmp_path, monkeypatch, png_idx=[0], npy_idx=[0])
+    meta_path = tmp_path / "outputs" / "s" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["config"] = {"KERNEL_SIZE": 17}
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    assert main(["--session", "s"]) == 0          # 判定は従来どおり（警告だけ）
+    out = capsys.readouterr().out
+    assert "[WARN]" in out
+    assert f"config.KERNEL_SIZE: 録画時=17 現行={config.KERNEL_SIZE}" in out
+
+
+def test_main_no_warning_when_recorded_conditions_match(tmp_path, monkeypatch, capsys):
+    _make_session(tmp_path, monkeypatch, png_idx=[0], npy_idx=[0])
+    meta_path = tmp_path / "outputs" / "s" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["config"] = {k: (list(v) if isinstance(v, tuple) else v) for k, v in (
+        (k, getattr(config, k)) for k in ("IMAGE_SIZE", "KERNEL_SIZE", "SEARCH_RANGE_X", "EDGE_TH",
+                                          "DISP_MAX", "INFER_BAND_LOW", "INFER_BAND_HIGH"))}
+    meta["params"] = dict(_PARAMS)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    assert main(["--session", "s"]) == 0
+    assert "[WARN]" not in capsys.readouterr().out

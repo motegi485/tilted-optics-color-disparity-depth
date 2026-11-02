@@ -1,4 +1,4 @@
-"""tools/analyze_resolution.py — 処理解像度 IMAGE_SIZE の最適化（最適化実験ランブック B3・2026-09-18）。
+"""tools/analyze_resolution.py — 処理解像度 IMAGE_SIZE の最適化（設定値の最適化実験 B3・2026-09-18）。
 
 校正 raw（`capture_calib --save-raw` が `data/calib_raw/<距離>.png` に残す 1280×720 のバースト平均）と評価 raw
 （`data/captures/<session>/<idx>.png`）から、処理解像度ごとに校正画像・評価フレームを `preprocess_to` で作り直し、

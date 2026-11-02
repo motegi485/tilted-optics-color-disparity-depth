@@ -16,7 +16,7 @@ CALIB_RAW_DIR = DATA_DIR / "calib_raw"                        # 校正撮影の 
 PARAMS_CSV_PATH = PARAMS_DIR / "params.csv"                   # calibrate.py の出力
 DIAG_CSV_PATH   = PARAMS_DIR / "calibration_diagnostics.csv" # 校正診断サマリ
 CAPTURES_DIR = DATA_DIR / "captures"     # raw 録画先（gitignore）
-OUTPUTS_DIR  = ROOT_DIR / "outputs"      # runner の結果保存（task 4 で使用）
+OUTPUTS_DIR  = ROOT_DIR / "outputs"      # runner の結果保存（gitignore）
 
 # 凍結ベースライン（静止画検証フィクスチャ。evaluate.py が読む側）
 BASELINE_DIR = PARAMS_DIR / "baseline"
@@ -51,7 +51,7 @@ DISP_PLOT_HEIGHT = 7.5    # 過大視差（探索端の誤マッチ）を除外
 # ===== キャリブレーション: RANSAC 直線フィット =====
 RANSAC_RESIDUAL_TH  = 8.0  # インライヤ残差閾値 [row]。None なら sklearn の MAD 自動
 RANSAC_RANDOM_STATE = 0    # シード固定（再現性確保）
-RANSAC_MIN_POINTS   = 10   # 有効な点の個数 n_pos/n_neg が、ぞれぞれフィットを始めるのに十分な数があるかの閾値
+RANSAC_MIN_POINTS   = 10   # 有効な点の個数 n_pos/n_neg が、それぞれフィットを始めるのに十分な数があるかの閾値
 
 # ===== webcam capture =====
 CAPTURE_BACKEND      = cv2.CAP_MSMF      # 実測で DSHOW は暗フレーム → MSMF

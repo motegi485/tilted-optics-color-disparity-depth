@@ -1,5 +1,5 @@
 """tools/probe_webcam.py
-Phase C 実機計測プローブ（診断用・使い捨て）。
+webcam 実機計測プローブ（診断用）。
 EOS R10 + EOS Webcam Utility Pro 経由の実フレーム解像度・実効 fps・色特性を実測する。
 core/ には依存しない。production コードではない。診断用ツールのため実行は root から行うこと
 （`uv run python tools/probe_webcam.py`）。

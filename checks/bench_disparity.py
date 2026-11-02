@@ -1,6 +1,6 @@
 """checks/bench_disparity.py — 高速化（Rust移植）用ベンチ（docs/module-core.md の実測ベンチ駆動の考え方）。
 
-calcDisparityByZNCC 単体と process_frame 全体の ms/frame を実測し、Phase D の
+calcDisparityByZNCC 単体と process_frame 全体の ms/frame を実測し、
 Python↔Rust 同条件比較（docs/verification-and-tools.md）の基礎データを取る。負荷は E(エッジ画素数)×S(search)×K²
 に比例し E は画像内容依存のため、時間だけでなく E を必ず併記する。
 
@@ -45,7 +45,7 @@ def _load_synthetic() -> tuple[str, np.ndarray]:
 
 
 def _load_test() -> tuple[str, np.ndarray]:
-    jpgs = sorted(config.TEST_DIR.glob("*.jpg"))
+    jpgs = sorted(config.TEST_DIR.glob("*.jpg", case_sensitive=False))
     if not jpgs:
         raise FileNotFoundError(f"data/test/*.jpg が見つかりません: {config.TEST_DIR}")
     path = jpgs[0]
@@ -88,7 +88,7 @@ def _bench(fn, n: int) -> tuple[float, float, float]:
 
 def _resolve_disparity_fn(impl: str):
     """--impl python: core._disparity_reference（凍結 Python 参照実装）。
-    --impl native: core.disparity（Phase D で Rust 実装への薄いラッパーに差し替え済み）。
+    --impl native: core.disparity（Rust 実装への薄いラッパー）。
     """
     if impl == "python":
         from core._disparity_reference import calcDisparityByZNCC
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="Phase D 用ベンチ: disparity/process_frame の ms/frame 計測")
+    parser = argparse.ArgumentParser(description="disparity/process_frame の ms/frame 計測（30fps バジェット判定）")
     parser.add_argument("--source", choices=("test", "captures", "synthetic"), default="synthetic")
     parser.add_argument("--session", default=None, help="--source captures 用のセッション名")
     parser.add_argument("--n", type=int, default=5, help="計測回数（既定5。1回のwarmupは別途・計測対象外）")
@@ -154,13 +154,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # process_frame(全体) は realtime/pipeline.py 内で `from core.disparity import
     # calcDisparityByZNCC` と固定 import しているため、--impl の値によらず常に core.disparity
-    # （Phase D 差し替え後は Rust 実装）を使う。--impl python 選択時は disparity 単体の数値のみが
+    # （Rust 実装）を使う。--impl python 選択時は disparity 単体の数値のみが
     # Python 参照実装になり、process_frame(全体) の数値とは実装が食い違う点に注意。
     mean_p, min_p, p95_p = _bench(run_pipeline, args.n)
     print(f"process_frame(全体・常にcore.disparity経由): 平均={mean_p:.2f}ms  最小={min_p:.2f}ms  p95={p95_p:.2f}ms"
           + ("" if args.impl == "native" else "  [注意: disparity単体はpython参照実装だがこちらは常にcore.disparity]"))
 
-    # Phase D の同条件比較にそのまま使える機械可読な1行サマリ（docs/verification-and-tools.md）
+    # 実装間・設定間の同条件比較にそのまま使える機械可読な1行サマリ（docs/verification-and-tools.md）
     print(f"BENCH source={args.source} name={name} impl={args.impl} E={E} S={config.SEARCH_RANGE_X} "
           f"K={config.KERNEL_SIZE} n_valid={n_valid} "
           f"disp_mean_ms={mean_d:.3f} disp_min_ms={min_d:.3f} disp_p95_ms={p95_d:.3f} "

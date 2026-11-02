@@ -137,7 +137,7 @@ def real_corpus_fixtures():
     以後に再録画したセッションに対する checks/verify_clip_replay.py の役割（docs/requirements-and-status.md）。
     """
     fx = []
-    for path in sorted(config.TEST_DIR.glob("*.jpg")):
+    for path in sorted(config.TEST_DIR.glob("*.jpg", case_sensitive=False)):
         img = cv2.imread(str(path))
         if img is None:
             continue

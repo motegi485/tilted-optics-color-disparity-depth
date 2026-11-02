@@ -1,4 +1,4 @@
-"""tools/analysis_common.py — 設定値の最適化実験（別管理の論文計画「設定値の最適化実験ランブック」・2026-09-16）で
+"""tools/analysis_common.py — 設定値の最適化実験（2026-09-16〜18・呼称は docs/README.md「実験キャンペーンの呼称」）で
 共有する解析基盤。本番の処理経路には含まれない。
 
 3 つの部品からなる。いずれも **config.py の値は読むが書き換えない**（設定はすべて引数で受ける）。
@@ -15,7 +15,7 @@
    RANSAC（`calibration.calibrate.ransac_fit_line`）→ 切片 → 参照式 curve_fit（`calibration.fit_params.model`）→
    DepthParams」を、`calibrate.py`／`fit_params.py` の main と同じ手順・同じ既定値で、ファイル I/O と print なしに行う。
    現行設定（0.45, 7.5, th=8, seed=0）で `params/params.csv`・`params/fit_result.csv` を再現することがテストの前提
-   （再現性チェック・ランブック「検証」）。
+   （再現性チェック）。
 3. 評価器 `evaluate_session`: 「視差スタック ＋ DepthParams ＋ ゲート → 距離別の誤差統計」。有効画素・ROI・統計量の定義は
    `checks.evaluate_distance_accuracy` と同じ（`summarize_errors` を再利用）。推論側に校正帯を適用する実験（A4）のため、
    gate1（|d| > disp_max）に加えて任意の帯 `band=(low, high)` の外側を無効化できる。
@@ -115,7 +115,7 @@ def scaled_settings(base: DispSettings, image_size: tuple[int, int], *, scale_ed
     """基準解像度の設定 base を image_size 用にスケールする。
 
     視差 [px] は解像度に比例するので、ZNCC 窓 K と探索幅 S を K' = round_to_odd(K·r)、S' = round_to_odd(S·r)
-    （r = W'/W_base）にして物理的に同じ窓・同じ探索範囲を保つ。EDGE_TH は既定で不変（ランブックの設計）。
+    （r = W'/W_base）にして物理的に同じ窓・同じ探索範囲を保つ。EDGE_TH は既定で不変（実験の設計）。
     同じ物理エッジの Sobel 応答は ≈1/r になる交絡があるので、scale_edge_th=True で T' = T/r も選べる。
     """
     r = scale_factor(image_size, base.image_size)

@@ -99,7 +99,7 @@ def test_draw_colorbar_near_red_at_bottom_far_blue_at_top():
     assert int(top_color[0]) > int(top_color[2])         # 上端: 青寄り(遠距離)
 
 
-# ===== _ensure_session_dirs (B-5) =====
+# ===== _ensure_session_dirs（セッションディレクトリの分離・上書き防止） =====
 
 def test_ensure_session_dirs_creates_new_session(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
@@ -400,6 +400,18 @@ def test_write_session_meta_records_session_video_enabled_details(tmp_path, monk
         "enabled": True, "fps": 15.0, "fourcc": "mp4v",
         "raw": "video_raw.mp4", "depth": "video_depth.mp4",
     }
+
+
+def test_write_session_meta_records_display_range(tmp_path, monkeypatch):
+    """表示レンジ（DEPTH_MIN/DEPTH_MAX）を記録する（viz PNG の色の割り当てを事後に確認できるように）。"""
+    monkeypatch.setattr(config, "DEPTH_MIN", 0)
+    monkeypatch.setattr(config, "DEPTH_MAX", 5000)
+
+    _write_session_meta(tmp_path, _dummy_params(), None, StillImageSource(tmp_path / "x.png"))
+
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert meta["display"] == {"DEPTH_MIN": 0, "DEPTH_MAX": 5000}
+    assert "DEPTH_MAX" not in meta["config"]     # 計算設定（再現一致の条件）とは分けて持つ
 
 
 # ===== run: 録画の保存失敗（2026-10-30 監査 IMPL-001） =====

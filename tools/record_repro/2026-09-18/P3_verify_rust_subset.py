@@ -34,7 +34,7 @@ SESSIONS = ["scene_01", "sign_near", "sign_far", "dist_2300"]
 
 def real_subset():
     fx = []
-    for path in sorted(config.TEST_DIR.glob("*.jpg")):
+    for path in sorted(config.TEST_DIR.glob("*.jpg", case_sensitive=False)):
         img = cv2.resize(cv2.imread(str(path)), config.IMAGE_SIZE)
         blue, _, red = cv2.split(img)
         fx.append((f"test/{path.name}", red, blue))

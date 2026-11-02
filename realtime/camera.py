@@ -7,7 +7,7 @@ docs/requirements-and-status.md に記載の「ライブ／クリップ再生で
 
 realtime/ は core ではない: config import・I/O・cv2・logging を持ってよい（docs/architecture.md）。
 計算の中核（視差・深度）は持たず、pipeline.py が core 純関数を呼ぶ。
-入力検証は raise（assert は -O で無効化されるため使わない・リスク#10）。
+入力検証は raise（assert は -O で無効化されるため使わない・docs/known-issues.md #10）。
 """
 from __future__ import annotations
 

@@ -12,9 +12,9 @@
 スレッドモデル（docs/module-realtime.md）: 取得スレッドが source.read() を回し、最新フレームを Lock 保護の
 単一スロットへ「上書き」する（キューに溜めない）。計算ループ（メインスレッド）はスロットから
 最新フレームのみを消費し、間に合わなかった中間フレームは自然に破棄される（遅延が蓄積しない）。
-同期は Lock のみで足りる（新フレーム待ちの Condition は不要）。Phase C（Python 実装・
-ZNCC ~14s/frame）では計算がカメラ(30fps)より遥かに遅く、計算が取得を追い越す状況は設計上
-起きなかった。Phase D で Rust 化した現在は process_frame が ~12ms/frame（docs/verification-and-tools.md のベンチ実測）
+同期は Lock のみで足りる（新フレーム待ちの Condition は不要）。Rust 化前の Python 実装
+（ZNCC ~14s/frame）では計算がカメラ(30fps)より遥かに遅く、計算が取得を追い越す状況は設計上
+起きなかった。Rust 化後は典型シーンで process_frame が 33ms/frame 未満（docs/verification-and-tools.md のベンチ実測）
 で、カメラ側の ~33ms より速いため「新フレームがまだ無い」側が定常になる。この場合は
 frame_id 一致で空回りを検出し 1ms sleep して待つ（下の計算ループ参照）ので、いずれの
 速度関係でも Lock のみで正しく動く。
@@ -29,11 +29,11 @@ gate2（Z レンジ 0<z<50000）はここ（表示側）で vmin/vmax として�
 
 realtime/ は core ではない（config import・I/O・cv2・threading を持ってよい・docs/architecture.md）。
 計算の中核は持たず pipeline.process_frame（→ core 純関数）を呼ぶだけ。
-入力検証は raise（assert は -O で無効化されるため使わない・リスク#10）。
+入力検証は raise（assert は -O で無効化されるため使わない・docs/known-issues.md #10）。
 
 注: cv2 ウィンドウのイベント処理（waitKey）は1フレームの計算が終わるまで走らない。
-    Phase C（Python 実装・~14s/frame）ではウィンドウが数秒間固まり、最初の表示も起動から
-    ~14s 後だった。Phase D の Rust 実装（~12ms/frame）ではこの体感は解消している。
+    Rust 化前の Python 実装（~14s/frame）ではウィンドウが数秒間固まった。Rust 実装では典型シーンで
+    33ms/frame 未満のためこの体感は無いが、ノイズ板全画面のような最悪ケース（~180ms/frame）では表示が遅れる。
 
 docs/requirements-and-status.md のクリップ再生「再現一致」検証（録った raw を1フレームずつ決定的に再生してライブ depth と
 一致を確認）は、フレームを間引かない別ドライバの役割（連番PNG再生 source の camera.py 追加と
@@ -376,7 +376,10 @@ def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     # 単一のディレクトリ名だけを許可する（2026-09 レビュー）。
     # 注: Windows の pathlib では Path("..").name == ".." となり name 比較だけでは弾けないため、
     # カレント/親ディレクトリ参照は明示的に除外する（2026-09 レビューの回帰テストで検出）。
-    if not session or session in {".", ".."} or Path(session).name != session:
+    # 区切り文字も明示的に拒否する（POSIX では "\\" が通常の文字なので Path.name 比較だけでは
+    # "a\\b" が通ってしまい、同じセッション名が Windows と Linux で別の扱いになる）。
+    if (not session or session in {".", ".."} or "/" in session or "\\" in session
+            or Path(session).name != session):
         raise ValueError(
             f"セッション名が不正です: {session!r}。パス区切り・親ディレクトリ参照(..)・"
             f"絶対パスを含まない単一のディレクトリ名を指定してください")
@@ -400,10 +403,10 @@ def _session_video_paths(captures_dir: Path, outputs_dir: Path) -> tuple[Path, P
 
 def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str | None,
                         source: FrameSource, *, record_video: bool = False) -> None:
-    """録画セッションの使用 params・config・起動条件を outputs/{session}/meta.json に記録する（B-6）。
+    """録画セッションの使用 params・config・起動条件を outputs/{session}/meta.json に記録する。
 
-    「録画時と同じ params を使う」制約（docs/requirements-and-status.md）が人間の記憶頼みだと、A-2 の既定変更（live）以降は
-    過去セッション（baseline 録画）との不一致事故が起きやすい。verify_clip_replay.py がこれを
+    「録画時と同じ params・config を使う」制約（docs/known-issues.md #25）が人間の記憶頼みだと、--params の既定を live に
+    変えた後は過去セッション（baseline 録画）との不一致事故が起きやすい。verify_clip_replay.py がこれを
     自動参照できるようにする。
 
     session_video は record_video が False でも常に記録する（{"enabled": false}）。後からセッションを
@@ -434,6 +437,12 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
             "DISP_MAX": config.DISP_MAX,
             "INFER_BAND_LOW": config.INFER_BAND_LOW,     # 推論帯（2026-09-18 新設）。過去セッションの meta.json には無い
             "INFER_BAND_HIGH": config.INFER_BAND_HIGH,
+        },
+        # 表示レンジ（gate2 の表示側適用・viz PNG／セッション動画の色の割り当て）。保存 npy には影響しない。
+        # 2026-11-02 より前のセッションの meta.json には無い（docs/known-issues.md「追加の観測事項」）。
+        "display": {
+            "DEPTH_MIN": config.DEPTH_MIN,
+            "DEPTH_MAX": config.DEPTH_MAX,
         },
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "source_type": type(source).__name__,
@@ -484,7 +493,7 @@ def run(
     録画中に raw PNG・viz PNG の書き込みが失敗したら RuntimeError で止める（npy は raw PNG の保存に
     成功したフレームにだけ書くので、raw の欠けた npy は残らない）。
 
-    params_path: 録画セッションの meta.json（B-6）に記録する起動時の --params 文字列（任意）。
+    params_path: 録画セッションの meta.json に記録する起動時の --params 文字列（任意）。
     record_video: セッション全長の閲覧用動画（raw/depth・docs/module-realtime.md）を録画するか。既定 False（オプトイン）。
         raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth は表示そのままをサンプル&ホールドで記録し、
         専用スレッド（_SessionVideoRecorder）で行うため計算ループの dt 計測窓には一切干渉しない。
@@ -537,7 +546,7 @@ def run(
                     t0 = time.perf_counter()
                     proc = preprocess(raw)             # raw -> (352,528,3)（runner が適用・docs/architecture.md）
                     depth = process_frame(proc, params)  # -> depth_map（NaN 伝播・視差ゲート gate1＋推論帯のみ適用済み・gate2 は表示側）
-                    dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（Phase D ベンチの素データ）
+                    dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（cFPS 表示の素データ）
 
                     color = to_colormap(depth, config.DEPTH_MIN, config.DEPTH_MAX)  # クリーン版を1回だけ生成
                     if colorbar:
@@ -622,7 +631,7 @@ def main(argv: list[str] | None = None) -> None:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="tilted-optics-color-disparity-depth リアルタイム実行（Phase C）")
+    parser = argparse.ArgumentParser(description="tilted-optics-color-disparity-depth リアルタイム実行")
     parser.add_argument("--source", choices=("webcam", "video", "still"), default="webcam")
     parser.add_argument("--path", default=None, help="video/still 用の入力パス")
     parser.add_argument("--params", default=str(config.PARAMS_PATH),

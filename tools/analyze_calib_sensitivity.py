@@ -1,4 +1,4 @@
-"""tools/analyze_calib_sensitivity.py — 校正帯・RANSAC・推論ゲートのグリッド探索（最適化実験ランブック A2・A4）。
+"""tools/analyze_calib_sensitivity.py — 校正帯・RANSAC・推論ゲートのグリッド探索（設定値の最適化実験 Phase A2・A4）。
 
 校正帯（DISP_PLOT_LOW < |d| < DISP_PLOT_HEIGHT）と RANSAC 残差閾値を振って校正し直し、各設定の 8 係数で
 校正と独立な距離（held-out）の精度を評価する。視差は設定に依存しないので、視差キャッシュ

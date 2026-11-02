@@ -1,4 +1,4 @@
-"""Phase A 回帰チェック（オーケストレーション層・暫定）。
+"""静止画回帰アンカーの照合（オーケストレーション層）。
 core/ の純関数を呼び、既存の参照実装の depth.py と同じ集計で比較する。
 ゲーティングは config 値でこの層が適用する（core は純関数のまま）。
 """
@@ -78,7 +78,7 @@ def main() -> int:
         except (AttributeError, ValueError):
             pass
 
-    img_paths = sorted(config.TEST_DIR.glob("*.jpg"))
+    img_paths = sorted(config.TEST_DIR.glob("*.jpg", case_sensitive=False))
     if not img_paths:
         print(f"[ERROR] 検証対象画像が見つかりません: {config.TEST_DIR}/*.jpg")
         return 2

@@ -7,7 +7,7 @@ Path B: evaluate.py の core 手順を独立に再現（split → disparity → 
 両者の depth マップが NaN 位置・有限値とも厳密一致することを確認する。
 
 gate2(0<z<50000) は両経路とも適用しない（runner 表示側の責務）。深度精度ではなく
-経路の同値性の確認なので、FR-8 webcam 校正前でも実施可。params は baseline 確定値を使う。
+経路の同値性の確認なので、webcam 校正の有無に関係なく実施可。params は baseline 確定値を使う。
 
 実行: uv run python -m checks.verify_pipeline_equivalence
 """
@@ -35,7 +35,7 @@ def load_fixture():
     test_dir = config.TEST_DIR
     cand = test_dir / "2300.jpg"
     if not cand.exists():
-        jpgs = sorted(test_dir.glob("*.jpg"))
+        jpgs = sorted(test_dir.glob("*.jpg", case_sensitive=False))
         if not jpgs:
             raise FileNotFoundError(
                 f"固定入力が見つかりません: {test_dir}/*.jpg を1枚用意してください"
@@ -95,7 +95,7 @@ def main():
     print(f"NaN 位置一致: {nan_match}  /  有限値ビット一致: {finite_match}")
 
     # 両経路とも全 NaN だと空集合同士の比較で match 判定が真になり得るため、
-    # 有効画素 0 は無条件で FAIL とする（Phase D の Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー）。
+    # 有効画素 0 は無条件で FAIL とする（Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー）。
     if n_finite == 0:
         print("[FAIL] 有効画素 0 — 入力・params・ゲートを確認")
         return 1

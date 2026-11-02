@@ -1,4 +1,4 @@
-"""calibration/capture_calib.py — FR-8 webcam 校正画像の取得（バースト平均 → preprocess → PNG。--save-raw で raw も保存）。
+"""calibration/capture_calib.py — webcam 校正画像の取得（バースト平均 → preprocess → PNG。--save-raw で raw も保存）。
 
 校正パイプライン「取得 → calibrate → fit_params」の最初の工程。`data/calib_imgs/{距離}.png`
 を出力し、後段の `calibration.calibrate` → `calibration.fit_params` が live 推論 params
@@ -11,7 +11,7 @@ INTER_AREA → 528×352）を **再利用** し、取得・前処理を独自に
 
 書き込み先は `data/calib_imgs/` のみ（`params/`・`outputs/` には触れない・docs/architecture.md）。プロンプト/
 メッセージは日本語、技術用語・パス・関数名・定数は英語のまま。入力検証は raise（assert は -O で
-無効化されるため使わない・リスク#10）。
+無効化されるため使わない・docs/known-issues.md #10）。
 """
 from __future__ import annotations
 
@@ -345,7 +345,7 @@ def run(n: int, save_raw: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="FR-8 webcam 校正画像の取得（バースト平均 → preprocess → PNG）")
+        description="webcam 校正画像の取得（バースト平均 → preprocess → PNG）")
     parser.add_argument("--n", type=int, default=DEFAULT_BURST_N,
                         help=f"バースト枚数（既定 {DEFAULT_BURST_N}）")
     parser.add_argument("--save-raw", action="store_true",

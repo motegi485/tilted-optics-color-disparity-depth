@@ -36,7 +36,7 @@ class DepthParams:
         値は float() で native float に正規化する（pandas 由来の numpy.float64 を core に持ち込まないため）。
 
         値の妥当性は ValueError で拒否する（入力検証は raise・assert は -O で無効化されるため
-        使わない・docs/known-issues.md のリスク#10）。ここがシステム境界の唯一の検証点であり、通過後は
+        使わない・docs/known-issues.md #10）。ここがシステム境界の唯一の検証点であり、通過後は
         compute_depth が無検査で使う:
           - 8係数すべてが有限。NaN/inf の係数は同符号枝の全有効画素を無音で NaN/inf にするため、
             推論に入る前に止める。

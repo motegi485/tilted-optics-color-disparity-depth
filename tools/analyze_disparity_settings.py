@@ -1,4 +1,4 @@
-"""tools/analyze_disparity_settings.py — ZNCC 窓 KERNEL_SIZE・エッジ閾値 EDGE_TH の最適化（最適化実験ランブック A5）。
+"""tools/analyze_disparity_settings.py — ZNCC 窓 KERNEL_SIZE・エッジ閾値 EDGE_TH の最適化（設定値の最適化実験 Phase A5）。
 
 視差推定層の設定 K（ZNCC 窓・奇数）と T（Sobel エッジ閾値）を一因子ずつ振り（OFAT）、各設定で
   校正画像 10 枚 ＋ 評価各セッション連続 N フレームの視差を再計算（tools.analysis_common のキャッシュ）

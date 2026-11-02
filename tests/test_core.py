@@ -1,7 +1,6 @@
 """core/disparity.py・core/depth.py・core/params.py の HW 非依存テスト（合成 numpy 配列のみ）。
 
-calcDisparityByZNCC の挙動テストは core.disparity（Phase D で Rust 実装への薄いラッパーに
-差し替え済み）と core._disparity_reference（凍結 Python 参照実装）の両方でパラメトライズする。
+calcDisparityByZNCC の挙動テストは core.disparity（Rust 実装への薄いラッパー）と core._disparity_reference（凍結 Python 参照実装）の両方でパラメトライズする。
 Rust↔Python の数値照合そのものは checks/verify_disparity_rust.py が広いコーパスで担うが、
 ここでの二重化は「どちらの実装も契約（ValueError・既知シフト・タイ→NaN）を満たす」ことを
 pytest の通常回帰網の中で恒久的に守るためのもの（2026-07 のコードレビュー指摘）。
@@ -50,7 +49,7 @@ def test_calc_disparity_non_2d_raises(calc_fn):
 # ===== calcDisparityByZNCC: ラッパー(core.disparity)のみの入力契約（2026-07-13 レビュー） =====
 # 参照実装(core._disparity_reference)は凍結のため対象外。参照実装のこれらの入力への挙動は
 # 契約外（float64 は cv2.error、負の kernel_size は負インデックス回り込み等）であり、
-# ラッパーで ValueError に統一する（docs/known-issues.md のリスク#10。PyO3 の TypeError/OverflowError 漏れの封止）。
+# ラッパーで ValueError に統一する（docs/known-issues.md #10。PyO3 の TypeError/OverflowError 漏れの封止）。
 
 def test_calc_disparity_wrapper_non_uint8_raises():
     img32 = np.zeros((40, 100), dtype=np.float32)

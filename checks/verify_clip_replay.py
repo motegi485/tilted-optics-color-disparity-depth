@@ -4,17 +4,17 @@
 captures/{session}/{i}.png を preprocess -> process_frame で再計算した depth が、
 全フレームで NaN 位置＋有限値ともビット一致するかを照合する。
 
-PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える・2026-10-30 監査 IMPL-001）。
+PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える・2026-10-30 追加）。
 preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化なので、再計算 depth は
 ライブ depth とビット一致するはず。一致＝録画→再生の経路が無劣化で、ライブ結果が保存
 クリップから完全再現可能(高速化段階の Python<->Rust 照合〈docs/verification-and-tools.md〉の土台)であることの回帰確認。
-照合ロジックは verify_pipeline_equivalence.py(task3)と同じ流儀(NaN 位置一致を確認して
+照合ロジックは verify_pipeline_equivalence.py と同じ流儀(NaN 位置一致を確認して
 から有限値をビット比較)。
 
 params は録画時と同じものを使う必要がある。--params 未指定時は outputs/{session}/meta.json
-（B-6・録画開始時に runner.py が書く）があればその params_path を自動採用し、無ければ
+（録画開始時に runner.py が書く）があればその params_path を自動採用し、無ければ
 live＝root fit_result.csv を既定とする。--params を明示指定すれば常にそちらが優先される。
-FR-8 以前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
+webcam 再校正（2026-07-03）以前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
 いるため、再検証時は --params params/baseline/fit_result.csv を明示すること。
 
 実行: uv run python -m checks.verify_clip_replay --session 20260624_153000
@@ -57,7 +57,7 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
         return False, f"NaN 位置不一致: {n} 画素"
     if np.count_nonzero(~nan_live) == 0:
         # 両者とも全 NaN だと空集合同士の比較で match 判定が真になり得るため無条件 FAIL とする
-        # (Phase D の Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー)。
+        # (Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー)。
         return False, "有効画素 0 — 入力・params・ゲートを確認"
     # NaN 位置が一致している前提で、有限値(同じマスク)をビット比較する
     if not np.array_equal(live[~nan_live], recomputed[~nan_live]):
@@ -65,6 +65,34 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
         return False, (f"有限値ビット不一致: max|Δ|={float(diff.max()):.6g}, "
                        f"不一致画素={int(np.count_nonzero(diff > 0))}")
     return True, "exact match"
+
+
+# meta.json の "config" に記録される計算設定（runner._write_session_meta と同じキー）。
+# INFER_BAND_* は 2026-09-18 以降のセッションにしか無い（無い＝推論帯なしで録画）。
+_REPLAY_CONFIG_KEYS = ("IMAGE_SIZE", "KERNEL_SIZE", "SEARCH_RANGE_X", "EDGE_TH", "DISP_MAX",
+                       "INFER_BAND_LOW", "INFER_BAND_HIGH")
+_PARAM_KEYS = ("v_pos", "u_pos", "a_pos", "w_pos", "v_neg", "u_neg", "a_neg", "w_neg")
+
+
+def _replay_mismatches(meta: dict, params) -> list[str]:
+    """録画時の meta.json と現行 config.py・読み込んだ params の食い違いを列挙する（警告用・判定には使わない）。
+
+    再現一致は録画時と同じ config・係数でしか成立しない（docs/known-issues.md #25）。食い違いがあると
+    不一致は「正常」なので、FAIL を回帰と誤読しないよう事前に知らせる。
+    """
+    out: list[str] = []
+    rec_cfg = meta.get("config", {})
+    for key in _REPLAY_CONFIG_KEYS:
+        cur = getattr(config, key)
+        cur = list(cur) if isinstance(cur, tuple) else cur
+        rec = rec_cfg.get(key, "（記録なし）")
+        if rec != cur:
+            out.append(f"config.{key}: 録画時={rec} 現行={cur}")
+    rec_params = meta.get("params", {})
+    for key in _PARAM_KEYS:
+        if key in rec_params and float(rec_params[key]) != float(getattr(params, key)):
+            out.append(f"params.{key}: 録画時={rec_params[key]!r} 読み込み値={getattr(params, key)!r}")
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,21 +131,28 @@ def main(argv: list[str] | None = None) -> int:
     png_stems = {p.stem for p in pngs}
     orphan_npys = sorted(p for p in out_dir.glob("??????.npy") if p.stem.isdigit() and p.stem not in png_stems)
 
+    meta_path = out_dir / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else None
     if args.params is not None:
         params_path = args.params
         print(f"params: 明示指定 {params_path}")
     else:
-        meta_path = out_dir / "meta.json"
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta is not None:
             params_path = meta["params_path"]
-            print(f"params: meta.json から採用 {params_path}（B-6）")
+            print(f"params: meta.json から採用 {params_path}")
         else:
             params_path = str(config.PARAMS_PATH)
             print(f"params: meta.json 無し。既定(live) {params_path}")
 
     params = load_params(params_path)
     print(f"session={args.session}  frames={len(pngs)}  params={params_path}")
+    if meta is not None:
+        mismatches = _replay_mismatches(meta, params)
+        if mismatches:
+            print("[WARN] 録画時の条件と現行の条件が異なります（このまま照合すると不一致になるのが正常・"
+                  "docs/known-issues.md #25）:")
+            for m in mismatches:
+                print(f"  - {m}")
 
     n_ok = 0
     first_fail: str | None = None

@@ -1,4 +1,4 @@
-"""evaluate_disparity_band_fraction.py — 校正帯（calibration band）に対する有効画素の視差分布の集計（実験ランブック手順 8'）。
+"""evaluate_disparity_band_fraction.py — 校正帯（calibration band）に対する有効画素の視差分布の集計。
 
 校正（calibration/calibrate.py）は DISP_PLOT_LOW < |d| < DISP_PLOT_HEIGHT（= 0.45 < |d| < 7.5 px・以下
 「校正帯」）の画素だけで直線 y = a·d + b を当て、d = 0 の切片を枝ごとに外挿する。2026-09-18 までの推論

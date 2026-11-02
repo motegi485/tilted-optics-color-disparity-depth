@@ -1,4 +1,4 @@
-"""tools/analyze_search_range.py — 探索範囲 SEARCH_RANGE_X の解析（最適化実験ランブック A3）。
+"""tools/analyze_search_range.py — 探索範囲 SEARCH_RANGE_X の解析（設定値の最適化実験 Phase A3）。
 
 探索範囲 S（奇数・半幅 (S−1)/2・到達上限 (S−1)/2 − 0.5）を決めるための 4 つの材料を 1 回の実行で出す。
 

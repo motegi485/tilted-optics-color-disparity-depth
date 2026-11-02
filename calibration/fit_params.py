@@ -124,7 +124,7 @@ def main():
     # --- フィッティング失敗行の除外（pos/neg を独立にフィルタ） ---
     # RANSAC コンセンサス不成立の行は calibrate.py が NaN を書く。isfinite でその行のみを除外する
     # （値域は制限しない）。参照式 y0(z) = v/z + u は z が大きいほど y0 → u に漸近するため、
-    # 「zero_disp > 定数」という旧フィルタは Phase E の長距離校正で正当な小/負の切片行を無警告で
+    # 「zero_disp > 定数」という旧フィルタは長距離校正（測定距離の拡張）で正当な小/負の切片行を無警告で
     # 落としてしまう（2026-07 レビューで撤廃・旧 MIN_VALID_PX）。
     df_pos = _filter_finite(df, "zero_disp_pos")
     df_neg = _filter_finite(df, "zero_disp_neg")
