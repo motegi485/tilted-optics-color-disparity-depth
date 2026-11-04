@@ -20,7 +20,7 @@ except ImportError as e:
         "Rustネイティブ拡張 _rt_disparity_native が見つかりません。"
         "rust/disparity/ で以下を実行してビルド・導入してください:\n"
         "  uv tool install maturin\n"
-        "  maturin build --release\n"
+        "  maturin build --release --interpreter ../../.venv/Scripts/python.exe\n"
         "  uv pip install (Get-ChildItem target/wheels/*.whl).FullName\n"
         "（`uv sync` を実行すると本拡張は再インストールが必要になります。README.md の「実行手順」参照）"
     ) from e

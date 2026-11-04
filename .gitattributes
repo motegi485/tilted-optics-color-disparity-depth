@@ -1,0 +1,6 @@
+# テキストは LF で追跡・展開する（システムの core.autocrlf=true でも CRLF にしない）。
+* text=auto eol=lf
+# 画像は改行変換の対象にしない。
+*.png binary
+*.jpg binary
+*.JPG binary

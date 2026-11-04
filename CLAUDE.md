@@ -12,6 +12,7 @@
 - **新しい内部文書もすべて `project_knowledge/` に作る。** このリポジトリに `docs/` などの内部文書を作らない。内部研究情報（評価値、未決事項、判断の経緯など）をこのリポジトリの文書に重複して書かない。コメントから参照するときは `project_knowledge/<パス>` と書く。
 - **文書と実装の食い違い**: 判断の根拠は内部文書を正とし、実際の挙動の一次情報はコードと実行結果である。食い違いを見つけたら確かめて報告する。研究上の手法・評価方法・受入基準・係数は独断で変えない。
 - `project_knowledge/` の commit・push は、ユーザーの指示がある場合に限る。秘密情報を書かない。
+- `project_knowledge/` は無視設定の対象なので、リポジトリ直下からの全文検索には出てこない。検索するときはパスに `project_knowledge` を指定する。
 
 ### `project_knowledge/` が無いとき
 
@@ -32,10 +33,10 @@
 - 校正 → 推論（リポジトリ root を cwd に）: `uv run python -m calibration.calibrate` → `uv run python -m calibration.fit_params` → `uv run python -m checks.evaluate`
 - 検証ハーネス（`checks/`）: `uv run python -m checks.evaluate` ／ `uv run python -m checks.verify_pipeline_equivalence` ／ `uv run python -m checks.verify_clip_replay --session <name>`
 - 自動テスト（`tests/`・HW 非依存の pytest）: `uv run python -m pytest`。dev 依存の追加は `uv add --dev <pkg>`
-- ベンチ: `uv run python -m checks.bench_disparity --impl native`
+- ベンチ: `uv run python -m checks.bench_disparity --impl native --source captures --session scene_01`（既定の `--source synthetic` は最悪ケース寄りの入力で、予算超の exit 1 になる）
 - Rust↔Python 照合: `uv run python -m checks.verify_disparity_rust`
 - Rust（cargo。`rust/disparity/` で実行。`cargo build`/`clippy` は `$env:PYO3_PYTHON` に venv の python.exe を指定するか有効な venv 下で実行する）: `cargo build` ／ `cargo test` ／ `cargo clippy`
-- Rust → Python 導入（**`maturin develop` は uv の venv では不可**＝pip 非搭載）: `rust/disparity/` で `maturin build --release` → `uv pip install (Get-ChildItem target\wheels\*.whl).FullName`。**`uv sync` を実行すると手動導入した Rust 拡張（`_rt_disparity_native`）は削除される**ため、`uv sync` 後は上記を再実行する
+- Rust → Python 導入（**`maturin develop` は uv の venv では不可**＝pip 非搭載）: `rust/disparity/` で `maturin build --release --interpreter ..\..\.venv\Scripts\python.exe` → `uv pip install (Get-ChildItem target\wheels\*.whl).FullName`。**`uv sync` を実行すると手動導入した Rust 拡張（`_rt_disparity_native`）は削除される**ため、`uv sync` 後は上記を再実行する
 - `tools/record_repro/` は、`project_knowledge/records/` の実験記録を読み書きする内部の再現・作図スクリプトである。通常の実行と自動テストはこれに依存しない
 - ※シェルは PowerShell。パス区切りは `\`、ワイルドカード展開は外部コマンドへ自動では効かないため `Get-ChildItem` 等を使う。
 

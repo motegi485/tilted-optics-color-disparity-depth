@@ -67,7 +67,7 @@ z = v / (y − ā·d − u)
    ```powershell
    uv sync
    cd rust\disparity
-   maturin build --release
+   maturin build --release --interpreter ..\..\.venv\Scripts\python.exe
    uv pip install (Get-ChildItem target\wheels\*.whl).FullName
    cd ..\..
    ```

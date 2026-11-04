@@ -33,7 +33,7 @@ try:
     import _rt_disparity_native as native
 except ImportError as e:
     print(f"[FATAL] _rt_disparity_native が見つかりません: {e}")
-    print("  rust/disparity/ で `maturin build --release` -> "
+    print("  rust/disparity/ で `maturin build --release --interpreter ../../.venv/Scripts/python.exe` -> "
           "`uv pip install (Get-ChildItem target/wheels/*.whl).FullName` を実行してください。")
     sys.exit(2)
 
