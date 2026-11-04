@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[4] / "project_knowledge" / "records" / "2026-09-18" / "B3_kernel"  # 入出力は記録フォルダ
 RUNS = {17: HERE.parent / "B3_scaleT", **{k: HERE / f"K{k}" for k in (13, 21, 25, 29, 33)}}
 WIDTHS = (396, 528, 660)
 # 解像度の色は固定順（3 色は全ペアで色覚の検証済み）

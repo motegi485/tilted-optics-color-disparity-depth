@@ -6,9 +6,9 @@
   runner が保存する ``outputs/<session>/<idx>_viz.png`` は、撮影時の ``config.DEPTH_MIN``/``DEPTH_MAX``
   （表示レンジ＝gate2 の表示側適用）で固定スケール化した見た目である。表示レンジは ``to_colormap`` の
   vmin/vmax にだけ効き、保存される深度 npy には影響しない（``realtime/pipeline.py``: gate2 は適用しない／
-  ``docs/module-realtime.md``「表示・保存」）。2026-09-15 の距離別精度キャンペーンは ``DEPTH_MAX=50000``
+  ``project_knowledge/modules/module-realtime.md``「表示・保存」）。2026-09-15 の距離別精度キャンペーンは ``DEPTH_MAX=50000``
   のまま撮影したため 1.3–3.3 m の板が全部「赤」に潰れて見えるが、npy は無事なので再撮影せず本ツールで
-  再描画する。``meta.json`` は表示レンジを記録しない（``docs/known-issues.md``）ため、出力フォルダ名に
+  再描画する。``meta.json`` は表示レンジを記録しない（``project_knowledge/implementation/known-issues.md``）ため、出力フォルダ名に
   レンジを含めて事後追跡できるようにする。
 
 色の割り当ては runner と同じ ``to_colormap``／``draw_colorbar`` を呼ぶ（反転 JET・近いほど赤・遠いほど青・

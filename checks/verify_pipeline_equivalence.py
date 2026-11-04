@@ -1,6 +1,6 @@
 """verify_pipeline_equivalence.py
 realtime.pipeline.process_frame と evaluate.py の per-frame core パス（集計前の depth マップ）が
-固定入力でビット一致することを検証する（docs/requirements-and-status.md の「経路の同値性」Done基準）。
+固定入力でビット一致することを検証する（project_knowledge/requirements/requirements.md の「経路の同値性」Done基準）。
 
 Path A: realtime.pipeline.process_frame（実モジュール）
 Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → 推論帯 → compute_depth）

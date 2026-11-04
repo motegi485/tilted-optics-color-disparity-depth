@@ -5,7 +5,7 @@ realtime.runner が保存した outputs/{session}/{i:06d}.npy（深度マップ�
 誤差統計を出す。深度の再計算はしない（保存済み npy をそのまま集計する。再現一致の確認は
 checks.verify_clip_replay の役割）。
 
-集計の定義（checks.evaluate の回帰アンカーと同じ流儀・docs/verification-and-tools.md）:
+集計の定義（checks.evaluate の回帰アンカーと同じ流儀・project_knowledge/implementation/verification-and-tools.md）:
   - 有効画素: gate2 と同じ config.DEPTH_MIN < z < config.DEPTH_MAX を満たす画素
     （NaN は比較で False となり自然に除外される）
   - 誤差 e = z_est − z_gt [mm]（画素ごと・float64 で集計）
@@ -46,7 +46,7 @@ import numpy as np
 import config
 
 
-# 出力 CSV の列順（print の表もこの順）。docs/verification-and-tools.md に列の定義を記載。
+# 出力 CSV の列順（print の表もこの順）。project_knowledge/implementation/verification-and-tools.md に列の定義を記載。
 COLUMNS = [
     "session", "gt_mm", "frames_used", "frames_total", "roi",
     "n_valid_total", "n_roi_px_per_frame", "valid_rate",

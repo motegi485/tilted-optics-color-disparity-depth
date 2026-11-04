@@ -33,7 +33,8 @@ ASSETS = ROOT / "docs/assets"
 RAW = ROOT / "data/captures/b5_scene_01/000010.png"
 DEPTH = ROOT / "outputs/b5_scene_01/000010.npy"
 META = ROOT / "outputs/b5_scene_01/meta.json"
-CALIB = ROOT / "docs/records/2026-09-18/params_final/params.csv"
+CALIB = ROOT / "project_knowledge/records/2026-09-18/params_final/params.csv"
+RECORD_DIR = ROOT / "project_knowledge/records/2026-10-30/readme-assets"
 CALIB_IMAGE = ROOT / "data/calib_imgs/2400.png"
 CALIB_RAW = ROOT / "data/calib_raw/2400.png"
 
@@ -171,7 +172,7 @@ def main() -> None:
                 "outputs_sha256": {p.name: digest(p) for p in
                     [ASSETS / n for n in ["readme-demo.png", "readme-optics-photo.png",
                      "readme-color-shift.png", "readme-pipeline.png", "readme-calibration-scatter.png"]]}}
-    (HERE / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (RECORD_DIR / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"inputs_unchanged": True, "finite_pixels": int(valid.sum()),
                       "calibration_scatter_matches_saved_csv": calibration_match, "pipeline_matches_saved_depth": pipeline_equal}, ensure_ascii=False))
 

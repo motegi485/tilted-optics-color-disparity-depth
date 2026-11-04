@@ -1,6 +1,6 @@
 """tools/w_offset_sim.py — w=0 固定と深度原点（センサ面 vs レンズ面）のずれの影響を数値で確認する。
 
-背景（docs/theory.md「w = 0 固定について」）:
+背景（project_knowledge/architecture/theory.md「w = 0 固定について」）:
   経験式 z = v/(y − ā·d − u) + w は w=0 に固定している。視差 0 の行 y0(z) = v/z + u は、
   合焦面（y–z 断面では直線）の透視投影から従う逆距離型で、z を投影中心（レンズ面近傍）から
   測る場合に厳密に成り立つ。本システムは z をセンサ面から測るため、レンズ面との原点差 δ
@@ -45,7 +45,7 @@ try:
 except Exception:
     pass
 
-# 校正キャンペーン（live）の距離レンジの既定値。docs/module-calibration.md「既知のパラメータセット」live 節。
+# 校正キャンペーン（live）の距離レンジの既定値。project_knowledge/modules/module-calibration.md「既知のパラメータセット」live 節。
 DEFAULT_Z_MIN_MM = 1400
 DEFAULT_Z_MAX_MM = 3200
 DEFAULT_Z_STEP_MM = 200

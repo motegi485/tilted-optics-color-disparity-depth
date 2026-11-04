@@ -24,7 +24,7 @@ from tools.analysis_common import evaluate_session, load_stack, summarize_holdou
 
 CACHE = Path(config.OUTPUTS_DIR) / "cache" / "disp" / "K25_S41_T20"
 MANIFEST = Path("outputs/distance_manifest_all.csv")
-RECHECK_CSV = Path("docs/records/2026-09-18/B3_recheck/K25/settings.csv")
+RECHECK_CSV = Path("project_knowledge/records/2026-09-18/B3_recheck/K25/settings.csv")
 KEYS = ["frames_used", "n_valid_total", "valid_rate", "mean_est_mm", "mean_err_mm", "mae_mm", "std_err_mm",
         "rmse_mm", "median_err_mm", "frame_mean_est_std_mm"]
 

@@ -19,7 +19,7 @@ realtime.pipeline.process_frame と同じ手順の z_live を得る（process_fr
 手順を辿る）。z_live は保存 npy（唯一の正本）と NaN 位置＋有限値のビット一致を確認し
 （checks.verify_clip_replay と同じ判定）、一致しなければその旨を CSV（replay_match）と標準出力に残す。
 2026-09-18 以前に旧設定（K17/S31/T30・推論帯なし）で録画したセッションでは replay_match は False になる
-（docs/known-issues.md）。
+（project_knowledge/implementation/known-issues.md）。
 
 集計の定義（distance_accuracy と同じ有効画素・ROI・暖機除外）:
   - 有効画素  : gate2 と同じ config.DEPTH_MIN < z < config.DEPTH_MAX を満たす画素（ROI 内）。
@@ -69,7 +69,7 @@ from realtime.camera import preprocess
 
 BANDS = ("below_band", "in_band", "above_band")
 
-# 出力 CSV の列順（print の表もこの順）。docs/verification-and-tools.md に列の定義を記載。
+# 出力 CSV の列順（print の表もこの順）。project_knowledge/implementation/verification-and-tools.md に列の定義を記載。
 COLUMNS = [
     "session", "gt_mm", "frames_used", "frames_total", "roi", "band_low_px", "band_high_px",
     "n_valid_total",
@@ -309,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
             any_mismatch = True
             print(f"[WARN] {session}: 再計算した深度が保存 npy とビット一致しないフレームがあります"
                   f"（params={params_path}。checks.verify_clip_replay で確認。"
-                  f"旧設定で録画したセッションなら想定どおり: docs/known-issues.md）")
+                  f"旧設定で録画したセッションなら想定どおり: project_knowledge/implementation/known-issues.md）")
         rows.append(r)
         print(f"  {session}: valid={r['n_valid_total']} below_band={r['n_below_band']} "
               f"below_band_fraction={_fmt(r['below_band_fraction'])} replay_match={r['replay_match']}")

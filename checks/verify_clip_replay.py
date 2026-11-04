@@ -1,4 +1,4 @@
-"""verify_clip_replay.py — docs/requirements-and-status.md のクリップ再生・再現一致の検証(root・camera.py 非依存)。
+"""verify_clip_replay.py — project_knowledge/requirements/requirements.md のクリップ再生・再現一致の検証(root・camera.py 非依存)。
 
 ライブ実行で保存した outputs/{session}/{i}.npy(depth・唯一の真実)と、同じ
 captures/{session}/{i}.png を preprocess -> process_frame で再計算した depth が、
@@ -7,7 +7,7 @@ captures/{session}/{i}.png を preprocess -> process_frame で再計算した de
 PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える・2026-10-30 追加）。
 preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化なので、再計算 depth は
 ライブ depth とビット一致するはず。一致＝録画→再生の経路が無劣化で、ライブ結果が保存
-クリップから完全再現可能(高速化段階の Python<->Rust 照合〈docs/verification-and-tools.md〉の土台)であることの回帰確認。
+クリップから完全再現可能(高速化段階の Python<->Rust 照合〈project_knowledge/implementation/verification-and-tools.md〉の土台)であることの回帰確認。
 照合ロジックは verify_pipeline_equivalence.py と同じ流儀(NaN 位置一致を確認して
 から有限値をビット比較)。
 
@@ -77,7 +77,7 @@ _PARAM_KEYS = ("v_pos", "u_pos", "a_pos", "w_pos", "v_neg", "u_neg", "a_neg", "w
 def _replay_mismatches(meta: dict, params) -> list[str]:
     """録画時の meta.json と現行 config.py・読み込んだ params の食い違いを列挙する（警告用・判定には使わない）。
 
-    再現一致は録画時と同じ config・係数でしか成立しない（docs/known-issues.md #25）。食い違いがあると
+    再現一致は録画時と同じ config・係数でしか成立しない（project_knowledge/implementation/known-issues.md #25）。食い違いがあると
     不一致は「正常」なので、FAIL を回帰と誤読しないよう事前に知らせる。
     """
     out: list[str] = []
@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="docs/requirements-and-status.md のクリップ再生・再現一致の検証")
+    parser = argparse.ArgumentParser(description="project_knowledge/requirements/requirements.md のクリップ再生・再現一致の検証")
     parser.add_argument("--session", required=True,
                         help="セッション名(captures/{session}, outputs/{session} を照合)")
     parser.add_argument("--params", default=None,
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         mismatches = _replay_mismatches(meta, params)
         if mismatches:
             print("[WARN] 録画時の条件と現行の条件が異なります（このまま照合すると不一致になるのが正常・"
-                  "docs/known-issues.md #25）:")
+                  "project_knowledge/implementation/known-issues.md #25）:")
             for m in mismatches:
                 print(f"  - {m}")
 
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     total = len(pngs) + len(orphan_npys)
     print(f"\n結果: {n_ok}/{total} フレーム一致")
     if n_ok == total:
-        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= docs/requirements-and-status.md のクリップ再生・再現一致 達成")
+        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= project_knowledge/requirements/requirements.md のクリップ再生・再現一致 達成")
         return 0
     print(f"[FAIL] 不一致あり(最初の不一致フレーム: {first_fail})")
     return 1

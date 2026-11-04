@@ -7,18 +7,18 @@ params.csv（calibrate.py の出力）から参照式 y0（d=0のy座標） = v/
 
 パイプライン上の位置: calibrate.py → params.csv → 【本ファイル】→ fit_result.csv → core/params.load_params（推論側）
 
-参照式（docs/theory.md の式(2) で d=0, w=0 とした形）:
+参照式（project_knowledge/architecture/theory.md の式(2) で d=0, w=0 とした形）:
     y0（d=0のy座標） = v / z + u
 各距離の zero_disp（視差0の y 座標＝直線フィットの切片 b）を z に対して上式でフィットし v, u を得る。
 ā は各距離の傾き a のサブセット平均。推論時はこれらを z = v/(y0 - ā·d - u) + w（w=0）に用いる。
 
-設計原則（docs/architecture.md）:
+設計原則（project_knowledge/architecture/architecture.md）:
   - calibration/ は core ではない。config import・I/O 可。scipy/pandas を直接使ってよい。
   - 入力検証は raise（assert は -O で無効化されるため使わない）。
-  - w=0 固定（2パラメータ）。根拠は docs/theory.md（過剰自由度による非物理解の回避、および
+  - w=0 固定（2パラメータ）。根拠は project_knowledge/architecture/theory.md（過剰自由度による非物理解の回避、および
     Fukino et al., IWAIT 2023 式(11) の参照式の形 ȳ = A/z + B との一致）。w をフリーにしない。
     ※「Michi 経験式との整合」は誤り（Michi ISPACS 2012 式(9) は分母内の定数を持たない別形）。
-      本システムの式(2) の4パラメータ形の出所は Fukino et al., ICECET 2024 式(10)(14)。詳細は docs/theory.md。
+      本システムの式(2) の4パラメータ形の出所は Fukino et al., ICECET 2024 式(10)(14)。詳細は project_knowledge/architecture/theory.md。
   - これは経験式（参照式）校正の再現であり、参考論文の幾何モデル校正（A・z_id・θ 同定）とは別物。
 
 実行（推奨。リポジトリ root を cwd に）:
@@ -57,7 +57,7 @@ def _filter_finite(df: pd.DataFrame, col: str) -> pd.DataFrame:
 def model(z, v, u):
     """参照式 y0 = v/z + u（w=0 固定の2パラメータ）。
 
-    w は理論的根拠（docs/theory.md）で 0 に固定するため、モデル関数の引数に含めない。
+    w は理論的根拠（project_knowledge/architecture/theory.md）で 0 に固定するため、モデル関数の引数に含めない。
     w=0 の値そのものは出力側（fit_result.csv の w_pos/w_neg）で明示的に 0.0 として書き出す。
     """
     return v / z + u
@@ -141,7 +141,7 @@ def main():
     zero_disp_neg = df_neg["zero_disp_neg"].values.astype(float)
 
     # --- 参照式フィット（符号別。w=0 固定の2パラメータ） ---
-    # pos = 視差 d>0 側、neg = d<0 側。前ぼけ/後ろぼけの物理ラベルは【要検証】のため使わない（docs/theory.md）。
+    # pos = 視差 d>0 側、neg = d<0 側。前ぼけ/後ろぼけの物理ラベルは【要検証】のため使わない（project_knowledge/architecture/theory.md）。
     v_pos, u_pos, _ = _fit_branch(depths_pos, zero_disp_pos, "pos (d>0)")
     v_neg, u_neg, _ = _fit_branch(depths_neg, zero_disp_neg, "neg (d<0)")
     w_pos = w_neg = 0.0

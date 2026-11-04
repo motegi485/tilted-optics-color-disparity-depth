@@ -49,7 +49,7 @@ def test_calc_disparity_non_2d_raises(calc_fn):
 # ===== calcDisparityByZNCC: ラッパー(core.disparity)のみの入力契約（2026-07-13 レビュー） =====
 # 参照実装(core._disparity_reference)は凍結のため対象外。参照実装のこれらの入力への挙動は
 # 契約外（float64 は cv2.error、負の kernel_size は負インデックス回り込み等）であり、
-# ラッパーで ValueError に統一する（docs/known-issues.md #10。PyO3 の TypeError/OverflowError 漏れの封止）。
+# ラッパーで ValueError に統一する（project_knowledge/implementation/known-issues.md #10。PyO3 の TypeError/OverflowError 漏れの封止）。
 
 def test_calc_disparity_wrapper_non_uint8_raises():
     img32 = np.zeros((40, 100), dtype=np.float32)
@@ -105,7 +105,7 @@ def _make_pattern(width: int, height: int, edge_col: int) -> np.ndarray:
 @pytest.mark.parametrize("calc_fn", _IMPLS)
 @pytest.mark.parametrize("shift", [1, -1, 3, -3, 7, -7])
 def test_calc_disparity_known_shift(shift, calc_fn):
-    """blue(c) = red(c+shift) の関係を作ると d ≈ shift になる(docs/theory.md の視差定義どおり)。"""
+    """blue(c) = red(c+shift) の関係を作ると d ≈ shift になる(project_knowledge/architecture/theory.md の視差定義どおり)。"""
     width, height, edge_col = 140, 40, 70
     red = _make_pattern(width, height, edge_col)
     blue = _make_pattern(width, height, edge_col - shift)

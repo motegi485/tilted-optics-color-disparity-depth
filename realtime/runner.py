@@ -1,6 +1,6 @@
-"""realtime/runner.py — オンライン実行のループ本体（docs/module-realtime.md）。
+"""realtime/runner.py — オンライン実行のループ本体（project_knowledge/modules/module-realtime.md）。
 
-データフロー（docs/architecture.md のオンラインデータフロー）を組み立てる:
+データフロー（project_knowledge/architecture/architecture.md のオンラインデータフロー）を組み立てる:
     source.read() -> raw(1280x720) -> preprocess -> proc(352,528,3)
       -> pipeline.process_frame(proc, params) -> depth_map(NaN 伝播)
       -> 表示（gate2 を vmin/vmax で適用・カラーマップ＋距離凡例のカラーバー）＋FPS
@@ -9,37 +9,37 @@
 実行: リポジトリ root から `uv run python -m realtime.runner --source webcam`
       （camera.py と同じく config を絶対 import するため、パッケージとして起動する）。
 
-スレッドモデル（docs/module-realtime.md）: 取得スレッドが source.read() を回し、最新フレームを Lock 保護の
+スレッドモデル（project_knowledge/modules/module-realtime.md）: 取得スレッドが source.read() を回し、最新フレームを Lock 保護の
 単一スロットへ「上書き」する（キューに溜めない）。計算ループ（メインスレッド）はスロットから
 最新フレームのみを消費し、間に合わなかった中間フレームは自然に破棄される（遅延が蓄積しない）。
 同期は Lock のみで足りる（新フレーム待ちの Condition は不要）。Rust 化前の Python 実装
 （ZNCC ~14s/frame）では計算がカメラ(30fps)より遥かに遅く、計算が取得を追い越す状況は設計上
-起きなかった。Rust 化後は典型シーンで process_frame が 33ms/frame 未満（docs/verification-and-tools.md のベンチ実測）
+起きなかった。Rust 化後は典型シーンで process_frame が 33ms/frame 未満（project_knowledge/implementation/verification-and-tools.md のベンチ実測）
 で、カメラ側の ~33ms より速いため「新フレームがまだ無い」側が定常になる。この場合は
 frame_id 一致で空回りを検出し 1ms sleep して待つ（下の計算ループ参照）ので、いずれの
 速度関係でも Lock のみで正しく動く。
 
 gate2（Z レンジ 0<z<50000）はここ（表示側）で vmin/vmax として適用し、process_frame が
 返す depth マップは書き換えない（書き換えると evaluate.py の depth マップとビット一致しなく
-なる・docs/requirements-and-status.md）。録画する depth は NaN を保持した float32 をそのまま np.save する（唯一の真実）。
+なる・project_knowledge/requirements/requirements.md）。録画する depth は NaN を保持した float32 をそのまま np.save する（唯一の真実）。
 表示用カラーマップは使い捨てコピー上で NaN を潰すだけで、元 depth には触れない。
 カラーバー（距離→色の凡例・draw_colorbar）は to_colormap 直後にこのコピーへ焼き込むため、
 保存する viz.png にも含まれる（HUD の FPS 等はこの後さらに焼き込むため、ライブ表示と
 セッション動画のみに残る・viz.png はクリーンなカラーマップ＋カラーバーで統一）。
 
-realtime/ は core ではない（config import・I/O・cv2・threading を持ってよい・docs/architecture.md）。
+realtime/ は core ではない（config import・I/O・cv2・threading を持ってよい・project_knowledge/architecture/architecture.md）。
 計算の中核は持たず pipeline.process_frame（→ core 純関数）を呼ぶだけ。
-入力検証は raise（assert は -O で無効化されるため使わない・docs/known-issues.md #10）。
+入力検証は raise（assert は -O で無効化されるため使わない・project_knowledge/implementation/known-issues.md #10）。
 
 注: cv2 ウィンドウのイベント処理（waitKey）は1フレームの計算が終わるまで走らない。
     Rust 化前の Python 実装（~14s/frame）ではウィンドウが数秒間固まった。Rust 実装では典型シーンで
     33ms/frame 未満のためこの体感は無いが、ノイズ板全画面のような最悪ケース（~180ms/frame）では表示が遅れる。
 
-docs/requirements-and-status.md のクリップ再生「再現一致」検証（録った raw を1フレームずつ決定的に再生してライブ depth と
+project_knowledge/requirements/requirements.md のクリップ再生「再現一致」検証（録った raw を1フレームずつ決定的に再生してライブ depth と
 一致を確認）は、フレームを間引かない別ドライバの役割（連番PNG再生 source の camera.py 追加と
 あわせて別途用意する）。本 runner はライブ取得（中間破棄あり）が責務。
 
-`--record-video`（既定 OFF）: 上記とは別に、セッション全長の閲覧用動画（raw/depth・docs/module-realtime.md）を
+`--record-video`（既定 OFF）: 上記とは別に、セッション全長の閲覧用動画（raw/depth・project_knowledge/modules/module-realtime.md）を
 専用スレッドで記録できる。canonical な連番 PNG/npy には一切影響しない付加機能。
 """
 from __future__ import annotations
@@ -135,7 +135,7 @@ def draw_colorbar(img: np.ndarray, vmin: float, vmax: float, *, num_ticks: int =
 
 
 class _FrameGrabber:
-    """取得スレッド: source.read() を回し最新 raw を単一スロットへ上書きする（docs/module-realtime.md）。
+    """取得スレッド: source.read() を回し最新 raw を単一スロットへ上書きする（project_knowledge/modules/module-realtime.md）。
 
     キューに溜めないことで遅延を一定に保つ。frame_id（単調増加）で計算側が「新しいフレームか／
     同じ最新を二度処理していないか」を判定できるようにする。EOF・read 失敗・スレッド内例外では
@@ -203,7 +203,7 @@ class _FrameGrabber:
 
 
 class _LatestFrameSlot:
-    """録画スレッドへ HUD 付き表示画像を1枚受け渡す単一スロット（docs/module-realtime.md のセッション動画）。
+    """録画スレッドへ HUD 付き表示画像を1枚受け渡す単一スロット（project_knowledge/modules/module-realtime.md のセッション動画）。
 
     _FrameGrabber と同型の「参照を上書き」パターンだが、ロックは _FrameGrabber とは別インスタンス
     にして両者を結合させない。メインループが公開する color は毎イテレーション to_colormap で
@@ -244,7 +244,7 @@ def _open_video_writer(
 
 
 class _SessionVideoRecorder:
-    """セッション全長の閲覧用動画（raw/depth）を録画する専用スレッド（docs/module-realtime.md）。
+    """セッション全長の閲覧用動画（raw/depth）を録画する専用スレッド（project_knowledge/modules/module-realtime.md）。
 
     grabber・メインループの計算ホットパスとは完全に分離する: raw は grabber.latest()
     （既存の複数リーダー安全なロック保護アクセサ）を、depth は display_slot（_LatestFrameSlot）を、
@@ -367,7 +367,7 @@ class _SessionVideoRecorder:
 
 def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
     # 録画を実行（セッション）ごとに分離する。captures/{session}, outputs/{session} に保存する
-    # 実行を跨いだ連番（000000..）の上書き・混在を論理的に防ぐ（docs/requirements-and-status.md のクリーン再現は
+    # 実行を跨いだ連番（000000..）の上書き・混在を論理的に防ぐ（project_knowledge/requirements/requirements.md のクリーン再現は
     # 1セッション内のクリーンな連番が前提）。既存かつ非空のディレクトリを黙って再利用すると
     # 連番が 000000 から上書きされ新旧フレームが混在した「キメラセッション」になり、
     # verify_clip_replay の自己整合チェックでは検出できない（2026-07 レビューで確認）ため、
@@ -397,7 +397,7 @@ def _ensure_session_dirs(session: str) -> tuple[Path, Path]:
 
 
 def _session_video_paths(captures_dir: Path, outputs_dir: Path) -> tuple[Path, Path]:
-    """セッション動画（docs/module-realtime.md）の raw/depth 出力先。captures/outputs の既存分離を踏襲する。"""
+    """セッション動画（project_knowledge/modules/module-realtime.md）の raw/depth 出力先。captures/outputs の既存分離を踏襲する。"""
     return captures_dir / config.SESSION_VIDEO_RAW_NAME, outputs_dir / config.SESSION_VIDEO_DEPTH_NAME
 
 
@@ -405,13 +405,13 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
                         source: FrameSource, *, record_video: bool = False) -> None:
     """録画セッションの使用 params・config・起動条件を outputs/{session}/meta.json に記録する。
 
-    「録画時と同じ params・config を使う」制約（docs/known-issues.md #25）が人間の記憶頼みだと、--params の既定を live に
+    「録画時と同じ params・config を使う」制約（project_knowledge/implementation/known-issues.md #25）が人間の記憶頼みだと、--params の既定を live に
     変えた後は過去セッション（baseline 録画）との不一致事故が起きやすい。verify_clip_replay.py がこれを
     自動参照できるようにする。
 
     session_video は record_video が False でも常に記録する（{"enabled": false}）。後からセッションを
     見たとき「動画が無いのは仕様か、本機能実装前の古いセッションか」を meta.json だけで判別できる
-    ようにするため（docs/module-realtime.md）。
+    ようにするため（project_knowledge/modules/module-realtime.md）。
     """
     if record_video:
         session_video = {
@@ -439,7 +439,7 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
             "INFER_BAND_HIGH": config.INFER_BAND_HIGH,
         },
         # 表示レンジ（gate2 の表示側適用・viz PNG／セッション動画の色の割り当て）。保存 npy には影響しない。
-        # 2026-11-02 より前のセッションの meta.json には無い（docs/known-issues.md「追加の観測事項」）。
+        # 2026-11-02 より前のセッションの meta.json には無い（project_knowledge/implementation/known-issues.md「追加の観測事項」）。
         "display": {
             "DEPTH_MIN": config.DEPTH_MIN,
             "DEPTH_MAX": config.DEPTH_MAX,
@@ -494,13 +494,13 @@ def run(
     成功したフレームにだけ書くので、raw の欠けた npy は残らない）。
 
     params_path: 録画セッションの meta.json に記録する起動時の --params 文字列（任意）。
-    record_video: セッション全長の閲覧用動画（raw/depth・docs/module-realtime.md）を録画するか。既定 False（オプトイン）。
+    record_video: セッション全長の閲覧用動画（raw/depth・project_knowledge/modules/module-realtime.md）を録画するか。既定 False（オプトイン）。
         raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth は表示そのままをサンプル&ホールドで記録し、
         専用スレッド（_SessionVideoRecorder）で行うため計算ループの dt 計測窓には一切干渉しない。
     colorbar: 距離→色の対応を示す凡例（draw_colorbar）を焼き込むか。既定 True。to_colormap 直後・
         HUD 描画より前に color へ焼き込むため、HUD（FPS 等・ライブ表示とセッション動画のみ）とは
         異なり、保存する viz.png にも含まれる（viz.png は human-viewing 専用で数値検証には使われない
-        ため、焼き込んでもdocs/requirements-and-status.md の再現一致検証やevaluate.py の回帰には影響しない）。
+        ため、焼き込んでもproject_knowledge/requirements/requirements.md の再現一致検証やevaluate.py の回帰には影響しない）。
     """
     if not isinstance(source, FrameSource):
         raise ValueError(f"run: source は FrameSource を想定。実際は {type(source)!r}")
@@ -544,7 +544,7 @@ def run(
                     last_id = fid
 
                     t0 = time.perf_counter()
-                    proc = preprocess(raw)             # raw -> (352,528,3)（runner が適用・docs/architecture.md）
+                    proc = preprocess(raw)             # raw -> (352,528,3)（runner が適用・project_knowledge/architecture/architecture.md）
                     depth = process_frame(proc, params)  # -> depth_map（NaN 伝播・視差ゲート gate1＋推論帯のみ適用済み・gate2 は表示側）
                     dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（cFPS 表示の素データ）
 
@@ -558,7 +558,7 @@ def run(
                         # （OpenCV 4.13 で確認）。戻り値を捨てると raw の欠けた npy が残り、再生照合からも漏れるため、
                         # npy を書く前に止める（2026-10-30 監査 IMPL-001・capture_calib.save_calib_png と同じ扱い）。
                         png_path = captures_dir / f"{idx:06d}.png"
-                        if not cv2.imwrite(str(png_path), raw):   # 可逆PNG（既定圧縮・docs/requirements-and-status.md の canonical）
+                        if not cv2.imwrite(str(png_path), raw):   # 可逆PNG（既定圧縮・project_knowledge/requirements/requirements.md の canonical）
                             raise RuntimeError(
                                 f"runner: raw PNG の書き込みに失敗しました: {png_path}（このフレームの depth npy は保存していません）")
                         np.save(str(outputs_dir / f"{idx:06d}.npy"), depth)      # NaN 保持の float32 を厳密保存
@@ -653,7 +653,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    params = load_params(args.params)                  # 起動時に1回だけ（ループ内で再計算しない・docs/architecture.md）
+    params = load_params(args.params)                  # 起動時に1回だけ（ループ内で再計算しない・project_knowledge/architecture/architecture.md）
     source = _build_source(args)
     run(source, params, record=not args.no_record, save_viz=not args.no_viz,
         record_video=args.record_video, colorbar=not args.no_colorbar,

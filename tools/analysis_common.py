@@ -1,4 +1,4 @@
-"""tools/analysis_common.py — 設定値の最適化実験（2026-09-16〜18・呼称は docs/README.md「実験キャンペーンの呼称」）で
+"""tools/analysis_common.py — 設定値の最適化実験（2026-09-16〜18・呼称は project_knowledge/INDEX.md「実験キャンペーンの呼称」）で
 共有する解析基盤。本番の処理経路には含まれない。
 
 3 つの部品からなる。いずれも **config.py の値は読むが書き換えない**（設定はすべて引数で受ける）。
@@ -21,7 +21,7 @@
    gate1（|d| > disp_max）に加えて任意の帯 `band=(low, high)` の外側を無効化できる。
 
 用語: `DispSettings.disp_max` は gate1 の上限（config.DISP_MAX と同じ定義 (S−1)/2）、`reach_max` は ZNCC 実装が返しうる
-|d| の上限 s_range − 0.5（端 2 ビン除外・|δ| < 0.5。docs/module-core.md）。両者の差が「gate1 は到達不能」の根拠。
+|d| の上限 s_range − 0.5（端 2 ビン除外・|δ| < 0.5。project_knowledge/modules/module-core.md）。両者の差が「gate1 は到達不能」の根拠。
 """
 from __future__ import annotations
 

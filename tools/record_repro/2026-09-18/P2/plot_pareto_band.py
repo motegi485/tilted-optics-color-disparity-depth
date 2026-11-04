@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[4] / "project_knowledge" / "records" / "2026-09-18" / "P2"  # 入出力は記録フォルダ
 TS = (20, 30, 45, 60)
 # T の色は固定順（3 色は全ペアで色覚の検証済み）。
 # T=45 は無彩色＋別マーカーで従属系列として描く（4 色目を使わない）

@@ -18,7 +18,7 @@ from core.depth import compute_depth
 from core.params import load_params
 
 
-# docs/verification-and-tools.md の回帰アンカー（DEPTH_MAX=50000・params/baseline/ 前提）。
+# project_knowledge/implementation/verification-and-tools.md の回帰アンカー（DEPTH_MAX=50000・params/baseline/ 前提）。
 # 2026-09-18 に設定変更（K17/S31/T30・gate1 のみ → K25/S41/T20・gate1＋推論帯 (0.45, 5)）に伴い取り直した値
 # （実測 平均 2213.3627 / MAE 218.9271 / 有効 6339・記録票 2026-09-18 §8）。baseline 係数は旧設定の静止画校正値のままなので
 # 距離の物理的な正しさではなく「計算経路が変わっていないこと」を検出するアンカーである。

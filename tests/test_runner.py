@@ -167,7 +167,7 @@ def test_ensure_session_dirs_existing_empty_dir_is_allowed(tmp_path, monkeypatch
     assert outputs.is_dir()
 
 
-# ===== セッション動画（docs/module-realtime.md）: _LatestFrameSlot =====
+# ===== セッション動画（project_knowledge/modules/module-realtime.md）: _LatestFrameSlot =====
 
 def test_latest_frame_slot_starts_empty_and_returns_updated_reference():
     slot = _LatestFrameSlot()

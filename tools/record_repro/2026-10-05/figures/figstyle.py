@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]                 # tools/record_repro/2026-10-05/figures → リポジトリ root
-RECORDS = ROOT / "docs" / "records"
+RECORDS = ROOT / "project_knowledge" / "records"
 if str(ROOT) not in sys.path:          # config・core・calibration・realtime・tools を import するため
     sys.path.insert(0, str(ROOT))
 
@@ -81,7 +81,7 @@ def save(fig, stem: str) -> list[Path]:
     メタデータの日時を消して、同じ入力なら同じ出力になるようにする。"""
     out = []
     for ext, meta in (("pdf", {"CreationDate": None, "ModDate": None}), ("png", {"Software": None})):
-        path = HERE / f"{stem}.{ext}"
+        path = RECORDS / "2026-10-05" / "figures" / f"{stem}.{ext}"
         fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.02, metadata=meta)
         out.append(path)
     plt.close(fig)

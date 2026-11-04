@@ -19,6 +19,9 @@ Thumbs.db
 # Rust build artifacts
 target/
 
+# 内部文書（別の Private リポジトリ。追跡しない）
+/project_knowledge/
+
 # Claude
 .claude/settings.local.json
 CLAUDE.local.md

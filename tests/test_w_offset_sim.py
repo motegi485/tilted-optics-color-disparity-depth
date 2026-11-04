@@ -4,7 +4,7 @@ import pytest
 
 from tools.w_offset_sim import main, simulate
 
-# 2026-07-03 live 校正の pos 係数に近い値（docs/module-calibration.md「既知のパラメータセット」live 節）。
+# 2026-07-03 live 校正の pos 係数に近い値（project_knowledge/modules/module-calibration.md「既知のパラメータセット」live 節）。
 # 係数の全桁一致は目的ではなく、「校正範囲で δ≈0.1 m の影響が px・mm でどの程度か」の桁を固定する。
 V_LIVE = 4.228e5
 U_LIVE = -63.81

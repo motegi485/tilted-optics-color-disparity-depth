@@ -1,6 +1,6 @@
 """checks/verify_disparity_rust.py::_passes の HW 非依存テスト（結果 dict を直接組み立てるのみ。
 _rt_disparity_native は import 時にモジュール直下で参照されるため、Rust 拡張未導入の環境では
-このファイルの import 自体が失敗する。core/disparity.py と同様に導入済みが前提・docs/verification-and-tools.md）。
+このファイルの import 自体が失敗する。core/disparity.py と同様に導入済みが前提・project_knowledge/implementation/verification-and-tools.md）。
 """
 from checks.verify_disparity_rust import MAX_DELTA_TOL, OVER_FINE_RATE_MAX, _passes
 

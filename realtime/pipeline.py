@@ -1,12 +1,12 @@
-"""realtime/pipeline.py — 毎フレーム処理（docs/architecture.md のオンラインデータフロー・docs/module-realtime.md）。
+"""realtime/pipeline.py — 毎フレーム処理（project_knowledge/architecture/architecture.md のオンラインデータフロー・project_knowledge/modules/module-realtime.md）。
 
 evaluate.py の per-frame core パスと同一手順で depth マップを返す（R/B 分割 →
 ZNCC → gate1(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=INFER_BAND_HIGH を NaN・2026-09-18 新設)
-→ depth）ことが、ふるまい一致（docs/requirements-and-status.md）の前提。
+→ depth）ことが、ふるまい一致（project_knowledge/requirements/requirements.md）の前提。
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
 core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<50000) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の
-ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・docs/known-issues.md #10）。
+ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・project_knowledge/implementation/known-issues.md #10）。
 """
 import cv2
 import numpy as np
