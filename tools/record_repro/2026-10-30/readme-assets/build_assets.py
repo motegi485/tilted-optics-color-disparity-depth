@@ -29,7 +29,7 @@ from core.params import load_params
 from realtime.pipeline import process_frame
 from calibration.calibrate import extract_sign_points, ransac_fit_line, _plot_branch
 
-ASSETS = ROOT / "docs/assets"
+ASSETS = ROOT / "assets/readme"
 RAW = ROOT / "data/captures/b5_scene_01/000010.png"
 DEPTH = ROOT / "outputs/b5_scene_01/000010.npy"
 META = ROOT / "outputs/b5_scene_01/meta.json"

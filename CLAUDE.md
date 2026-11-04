@@ -22,7 +22,7 @@
 
 ## このリポジトリの文書
 
-- 文書として残すのは `README.md`・`CLAUDE.md`・`AGENTS.md` と、README の図 `docs/assets/` だけである。
+- 文書として残すのは `README.md`・`CLAUDE.md`・`AGENTS.md` と、README の図 `assets/readme/` だけである。
 - `README.md` は利用者向けの入口で、作業の判断材料としては使わない。詳細な研究情報は書かない。掲載図の出典説明は README の「掲載画像について」に置く。
 - **`CLAUDE.md` と `AGENTS.md` は同一内容を保つ。** 片方を変えたらもう片方も変える。
 
