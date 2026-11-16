@@ -1,5 +1,5 @@
 """静止画回帰アンカーの照合（オーケストレーション層）。
-core/ の純関数を呼び、既存の参照実装の depth.py と同じ集計で比較する。
+core/ の純関数を呼び、有効画素の平均距離・MAE（正解距離との絶対誤差の平均）・有効画素数を集計して比較する。
 ゲーティングは config 値でこの層が適用する（core は純関数のまま）。
 """
 # --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
@@ -18,8 +18,8 @@ from core.depth import compute_depth
 from core.params import load_params
 
 
-# 回帰アンカー（K25/S41/T20・推論帯 (0.45, 5)・DEPTH_MAX=5000・params/baseline/ 前提）。
-# baseline 係数は旧設定の静止画校正値のままなので、距離の物理的な正しさではなく
+# 回帰アンカー（KERNEL_SIZE=25・SEARCH_RANGE_X=41・EDGE_TH=20・推論帯 (0.45, 5)・DEPTH_MAX=5000・params/baseline/ 前提）。
+# baseline 係数は、現行とは別の設定・撮影条件で作った静止画の校正値なので、距離の物理的な正しさではなく
 # 「計算経路が変わっていないこと」を検出するためのアンカーである。
 # 期待値は距離範囲ゲート（DEPTH_MIN < z < DEPTH_MAX）の上限が 5000 のときの値。
 # config の上限や推論帯を変えたら取り直すこと。

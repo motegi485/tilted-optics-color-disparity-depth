@@ -16,8 +16,9 @@
 2. 校正の純関数 `calibrate_from_disparity`: 「視差マップ群 → 点抽出（`calibration.calibrate.extract_sign_points`）→
    RANSAC（`calibration.calibrate.ransac_fit_line`）→ 切片 → 参照式 curve_fit（`calibration.fit_params.model`）→
    DepthParams」を、`calibrate.py`／`fit_params.py` の main と同じ手順・同じ既定値で、ファイル I/O と print なしに行う。
-   現行設定（0.45, 7.5, th=8, seed=0）で `params/params.csv`・`params/fit_result.csv` を再現することがテストの前提
-   （再現性チェック）。
+   手元の校正画像でこの設定（0.45, 7.5, th=8, seed=0）のまま実行すると、`params/params.csv`・`params/fit_result.csv`
+   を再現するはずである（calibrate.py・fit_params.py と同じ手順であることの確認になる）。リポジトリのテストは、
+   合成した視差から係数を回復できることだけを見る。
 3. 評価器 `evaluate_session`: 「視差スタック ＋ DepthParams ＋ ゲート → 距離別の誤差統計」。有効画素・ROI・統計量の定義は
    `checks.evaluate_distance_accuracy` と同じ（`summarize_errors` を再利用）。推論側にも校正帯を適用する比較のため、
    視差上限ゲート（|d| > disp_max）に加えて任意の帯 `band=(low, high)` の外側を無効化できる。

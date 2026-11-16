@@ -8,6 +8,11 @@ core._disparity_reference（凍結 Python 参照実装）と _rt_disparity_nativ
 あわせて Rust の sequential(parallel=False) vs parallel(True) の決定論一致も確認する
 （rayon 並列化がデータ競合なく同じ結果を返すことの根拠）。
 
+注意: Rust 版は ZNCC を整数和から求めて f64 で割り、Python 参照実装（OpenCV の matchTemplate）は
+f32 で累積するため、丸めが 1〜数 ulp 異なる。実写では、類似度がほぼ同値の近接ピークが 2 つ並ぶ画素で、
+どちらを選ぶかが逆になり、1 画素ほど NaN 位置や視差値が食い違うことがある。ZNCC の配列を見て近接ピークの
+同値であることが確認できれば、実装の誤りではない。
+
 対象入力:
   - tests/test_core.py 由来の合成パターン（既知シフト・平坦blue）
   - 敵対的入力（全面平坦・templ側飽和隣接エッジ・周期縞・極小画像・縮退パラメータ・
@@ -278,7 +283,7 @@ def main(argv: list[str] | None = None):
 
     # 契約チェック（native 単体の防御動作。ラッパー core/disparity.py の契約は
     # tests/test_core.py が担う）: 偶数値・形状不一致は ValueError、空画像は panic せず
-    # 空の全NaNマップを返す（w=0×kernel_size=1 で par_chunks_mut(0) が panic しないことの回帰確認）
+    # 空の全NaNマップを返す（画像幅 0 かつ kernel_size=1 で par_chunks_mut(0) が panic しないことの回帰確認）
     contract_failures = []
     img = np.zeros((40, 100), dtype=np.uint8)
 

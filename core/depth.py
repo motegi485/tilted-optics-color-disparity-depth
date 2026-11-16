@@ -25,7 +25,7 @@ def compute_depth(disp_map, v_pos, u_pos, a_pos, w_pos, v_neg, u_neg, a_neg, w_n
         各距離の直線傾き a の平均値 ā。d > 0 側。
     w_pos : float
         参照式の定数項 w。d > 0 側。
-        実験的に 0 としている（2 パラメータモデル z = v/(y - a·d - u)）。
+        自由度過剰を避けるため 0 に固定している（2 パラメータモデル z = v/(y - a·d - u)。理由は calibration/fit_params.py の docstring）。
         論文式との対応・将来拡張のため引数として保持。
     v_neg : float
         参照式の v パラメータ。d < 0 側。
@@ -35,7 +35,7 @@ def compute_depth(disp_map, v_pos, u_pos, a_pos, w_pos, v_neg, u_neg, a_neg, w_n
         各距離の直線傾き a の平均値 ā。d < 0 側。
     w_neg : float
         参照式の定数項 w。d < 0 側。
-        実験的に 0 としている（2 パラメータモデル z = v/(y - a·d - u)）。
+        自由度過剰を避けるため 0 に固定している（2 パラメータモデル z = v/(y - a·d - u)。理由は calibration/fit_params.py の docstring）。
         論文式との対応・将来拡張のため引数として保持。
     eps_den : float
         分母ゼロガードの閾値 [px]。

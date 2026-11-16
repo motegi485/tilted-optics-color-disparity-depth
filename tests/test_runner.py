@@ -1,5 +1,6 @@
 """realtime/runner.py の HW 非依存テスト（合成 numpy 配列・tmp_path のみ）。"""
 import json
+import threading
 
 import cv2
 import numpy as np
@@ -519,6 +520,86 @@ def _run_one_frame(tmp_path, monkeypatch, fail_when=None):
     monkeypatch.setattr(cv2, "imwrite", imwrite)
     run(_OneFrameSource(), _dummy_params(), record=True, save_viz=True, session="s", log_every=0)
     return tmp_path / "captures" / "s", tmp_path / "outputs" / "s"
+
+
+class _LockstepSource(FrameSource):
+    """raw を n 枚返す source。直前の 1 枚の処理が終わるまで次を返さない（取りこぼしなしで全フレームを処理させる）。"""
+
+    def __init__(self, n):
+        self.total = n
+        self.n = 0
+        self.consumed = threading.Event()
+        self.consumed.set()
+
+    def open(self) -> None:
+        pass
+
+    def read(self):
+        if not self.consumed.wait(timeout=10):
+            return False, None
+        self.consumed.clear()
+        if self.n >= self.total:
+            return False, None
+        self.n += 1
+        return True, np.zeros((*reversed(config.WEBCAM_NATIVE_SIZE), 3), dtype=np.uint8)
+
+    def release(self) -> None:
+        pass
+
+
+def test_run_live_view_holds_valid_pixels_but_saves_clean_outputs(tmp_path, monkeypatch):
+    """ライブ表示だけが valid-hold・並置・キー切替の影響を受け、保存する npy・viz は影響を受けない。
+
+    フレーム 0 でだけ有効な画素 (100,100) が、hold ON のフレーム 1 の表示には残り、v キーで OFF にした
+    フレーム 2 の表示では黒に戻る。保存する viz はどのフレームでもその画素が黒（クリーン版）である。
+    """
+    import realtime.runner as runner_mod
+
+    n_frames = 4
+    src = _LockstepSource(n_frames)
+    depths = []
+    for k in range(n_frames):
+        d = np.full((352, 528), np.nan, dtype=np.float32)
+        d[50, 50] = 3000.0                       # 全フレームで有効
+        if k == 0:
+            d[100, 100] = 2000.0                 # フレーム 0 でだけ有効
+        depths.append(d)
+    counter = {"i": 0}
+
+    def fake_process_frame(proc, params):
+        d = depths[counter["i"]]
+        counter["i"] += 1
+        src.consumed.set()                       # 次のフレームを返してよい
+        return d
+
+    shown = []
+    keys = iter([-1, ord("v"), -1, -1])          # 2 回目の waitKey（フレーム 1 の表示後）で hold を OFF にする
+    monkeypatch.setattr(runner_mod, "process_frame", fake_process_frame)
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+    monkeypatch.setattr(cv2, "namedWindow", lambda *a, **k: None)
+    monkeypatch.setattr(cv2, "imshow", lambda name, img: shown.append(img.copy()))
+    monkeypatch.setattr(cv2, "waitKey", lambda *a, **k: next(keys, -1))
+    monkeypatch.setattr(cv2, "destroyAllWindows", lambda *a, **k: None)
+
+    run(src, _dummy_params(), record=True, save_viz=True, session="live", log_every=0)
+
+    assert len(shown) == n_frames
+    assert all(img.shape == (352, 1056, 3) for img in shown)          # 左: 入力画像、右: 距離マップ
+    black = (0, 0, 0)
+    px = [tuple(int(c) for c in img[100, 528 + 100]) for img in shown]
+    assert px[0] != black                         # フレーム 0: 有効画素そのもの
+    assert px[1] != black                         # フレーム 1: hold ON なので直前の有効値が残る
+    assert px[2] == black                         # フレーム 2: v キーで hold OFF
+    assert px[3] == black
+    outputs = tmp_path / "outputs" / "live"
+    for k in range(n_frames):
+        saved = np.load(str(outputs / f"{k:06d}.npy"))
+        np.testing.assert_array_equal(saved, depths[k])               # 保存する depth は process_frame の出力のまま
+        viz = cv2.imread(str(outputs / f"{k:06d}_viz.png"))
+        assert viz.shape == (352, 528, 3)                             # 保存 viz は距離マップだけ（並置しない）
+        if k > 0:
+            assert tuple(int(c) for c in viz[100, 100]) == black      # 保存 viz には valid-hold を掛けない
 
 
 def test_run_saves_raw_png_depth_npy_and_viz(tmp_path, monkeypatch):

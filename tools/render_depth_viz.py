@@ -9,7 +9,7 @@
   出力フォルダ名にレンジを含めるので、どのレンジで描いた画像かを後から追える。
 
 色の割り当ては runner と同じ ``to_colormap``／``draw_colorbar`` を呼ぶ（反転 JET・近いほど赤・遠いほど青・
-NaN は黒）。``config.py`` の値は書き換えない。**`config.py` に依存する**
+NaN と範囲外〈z <= vmin、z >= vmax〉は黒）。``config.py`` の値は書き換えない。**`config.py` に依存する**
 （既定の ``OUTPUTS_DIR``・``DEPTH_MIN``/``DEPTH_MAX``）。
 
 実行例（リポジトリ root・PowerShell）:

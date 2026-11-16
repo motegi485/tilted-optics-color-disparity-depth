@@ -33,7 +33,7 @@
 再生して結果を照合する用途は扱わない（その検証は checks/verify_clip_replay.py）。
 
 `--record-video`（既定 OFF）: 上記とは別に、セッション全長の閲覧用動画（raw/depth）を
-専用スレッドで記録できる。連番 PNG/npy には一切影響しない付加機能。
+専用スレッドで記録できる。連番 PNG/npy には影響しない付加機能。
 
 realtime/ は core ではない（config import・I/O・cv2・threading を持ってよい）。
 計算の中核は持たず pipeline.process_frame（→ core 純関数）を呼ぶだけ。
@@ -249,7 +249,7 @@ def _open_video_writer(
 class _SessionVideoRecorder:
     """セッション全長の閲覧用動画（raw/depth）を録画する専用スレッド。
 
-    grabber・メインループの計算ホットパスとは完全に分離する: raw は grabber.latest()
+    grabber・メインループとは別スレッドで動かし、計算の計測区間（dt）に録画のコードを含めない: raw は grabber.latest()
     （既存の複数リーダー安全なロック保護アクセサ）を、depth は display_slot（_LatestFrameSlot）を、
     それぞれ自スレッドの一定周期で読むだけで、書き込み側をブロックしない。
 
@@ -464,6 +464,7 @@ def hold_valid(depth: np.ndarray, history) -> np.ndarray:
     縦エッジ上の有効画素は毎フレーム 2 割ほど入れ替わり、そのまま表示すると点が明滅して見える。
     直前の数フレームで一度でも有効だった画素を残すと、明滅が減る（代わりに、動く物体の後ろに
     数フレーム分の残像が出る）。history は新しい順の depth の並び。入力は書き換えない。
+    「有効」は NaN でないことだけで判定する（範囲外の値も有効として保持し、描画のときに to_colormap が黒にする）。
     この処理は表示専用で、保存する depth(npy)・viz・セッション動画には使わない。
     """
     out = depth.copy()
@@ -539,12 +540,17 @@ def run(
 
     params_path: 録画セッションの meta.json に記録する起動時の --params 文字列（任意）。
     record_video: セッション全長の閲覧用動画（raw/depth）を録画するか。既定 False（オプトイン）。
-        raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth は表示そのままをサンプル&ホールドで記録し、
-        専用スレッド（_SessionVideoRecorder）で行うため計算ループの dt 計測窓には一切干渉しない。
+        raw は前処理後 FOV の連続 ~SESSION_VIDEO_FPS、depth はクリーン版（valid-hold を掛けない距離マップ＋HUD）
+        をサンプル&ホールドで記録する。専用スレッド（_SessionVideoRecorder）で行い、dt の計測区間
+        （preprocess＋process_frame）には録画のコードを含めない。
     colorbar: 距離→色の対応を示す凡例（draw_colorbar）を焼き込むか。既定 True。to_colormap 直後・
         HUD 描画より前に color へ焼き込むため、HUD（FPS 等・ライブ表示とセッション動画のみ）とは
         異なり、保存する viz.png にも含まれる（viz.png は目視用で数値検証には使われないため、
         焼き込んでも再生照合や checks/evaluate.py の回帰には影響しない）。
+
+    ライブ表示（保存・動画には影響しない）: 左に入力画像、右に距離マップを並べて出す（compose_live_view）。
+    キー操作は v＝valid-hold（直前の数フレームの有効値で埋める。既定 ON）、h＝HUD と操作ヒントの
+    表示切替、q／Esc＝終了。valid-hold と表示切替は run() 内の状態で、起動のたびに既定へ戻る。
     """
     if not isinstance(source, FrameSource):
         raise ValueError(f"run: source は FrameSource を想定。実際は {type(source)!r}")
@@ -606,7 +612,7 @@ def run(
                     dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（cFPS 表示の素データ）
 
                     # color: 保存する viz とセッション動画の元になるクリーン版（valid-hold を掛けない）。
-                    # どちらも使わないとき（--no-record・動画なし）は作らない。
+                    # どちらも使わないとき（viz を保存しない・動画なし）は作らない。
                     need_clean = (record and save_viz) or display_slot is not None
                     color = render(depth) if need_clean else None
                     # live_color: ライブ表示用。hold_on のときだけ、直前の数フレームの有効値で埋める。
@@ -707,7 +713,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--source", choices=("webcam", "video", "still"), default="webcam")
     parser.add_argument("--path", default=None, help="video/still 用の入力パス")
     parser.add_argument("--params", default=str(config.PARAMS_PATH),
-                        help="fit_result.csv のパス（既定: live＝root。baseline を使う場合は明示指定）")
+                        help="fit_result.csv のパス（既定: params/fit_result.csv。回帰用の旧係数 params/baseline/ を使う場合は明示指定）")
     parser.add_argument("--loop", action="store_true", help="video source を EOF で巻き戻して継続")
     parser.add_argument("--no-record", action="store_true", help="録画を無効化")
     parser.add_argument("--no-viz", action="store_true", help="colormap PNG(viz) の保存を無効化")

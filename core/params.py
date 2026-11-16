@@ -16,7 +16,7 @@ class DepthParams:
 
     pos = 視差 d > 0 側、neg = d < 0 側。前ぼけ/後ろぼけのラベルではなく符号で持つ
     （前後対応は校正の符号規約・リグ構成に依存するため、係数コンテナは符号のみを扱う）。
-    w は実験的に 0 としているが、論文式との対応と将来の再検討のため欄として残す
+    w は、自由度過剰を避けるために 0 に固定している（理由は calibration/fit_params.py の docstring）が、論文式との対応と将来の再検討のため欄として残す
     （0 固定の強制は fit_params.py 側の責務）。
     """
     v_pos: float
@@ -40,8 +40,9 @@ class DepthParams:
         compute_depth が無検査で使う:
           - 8係数すべてが有限。NaN/inf の係数は同符号枝の全有効画素を無音で NaN/inf にするため、
             推論に入る前に止める。
-          - w_pos == w_neg == 0。w=0 固定は、2 パラメータの参照式 z = v/(y−ā·d−u) を実験的に採用した設計判断であり、
-            CSV の手編集や旧実験ファイルで 0 以外が紛れ込むと全画素に一律オフセットが乗る。
+          - w_pos == w_neg == 0。w=0 固定は、自由度過剰を避けるために 2 パラメータの参照式
+            z = v/(y−ā·d−u) を採用した設計判断であり（理由は calibration/fit_params.py の docstring）、
+            CSV の手編集や別の実験で作ったファイルで 0 以外が紛れ込むと全画素に一律オフセットが乗る。
         """
         required = (
             "v_pos", "u_pos", "a_pos", "w_pos",
@@ -71,7 +72,7 @@ class DepthParams:
         if nonzero_w:
             detail = ", ".join(f"{k}={values[k]!r}" for k in nonzero_w)
             raise ValueError(
-                f"w は 0 固定です（参照式 z = v/(y−ā·d−u) の w は実験的に 0 としています）。0 以外の値が指定されています: {detail}"
+                f"w は 0 固定です（自由度過剰を避けるため、参照式は z = v/(y−ā·d−u) の 2 パラメータ形です）。0 以外の値が指定されています: {detail}"
             )
 
         return cls(**values)

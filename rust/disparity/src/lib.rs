@@ -1,8 +1,10 @@
 //! calcDisparityByZNCC の Rust 実装（core/disparity.py から呼ばれる内部拡張）。
 //!
-//! core/_disparity_reference.py（凍結された Python 参照実装）と 1:1 で一致するように
+//! core/_disparity_reference.py（凍結された Python 参照実装）と同じ結果になるように
 //! 移植している。境界条件・タイ処理・浮動小数の評価順まで意図的に複製した箇所は、
 //! 各関数のコメントに理由を記す（`checks/verify_disparity_rust.py` で照合する）。
+//! 丸めの違いにより、実写では近接ピークの 1 画素ほどが食い違うことがある
+//! （詳細は checks/verify_disparity_rust.py の docstring）。
 //!
 //! 元の Python 実装は TiltedOpticsDepthIntro（MIT, Copyright (c) 2025 aoi1115）のコードを元にしている。
 //! 著作権表示と許諾文はリポジトリ直下の NOTICE を参照。
@@ -57,7 +59,7 @@ fn sobel_dx_abs(src: &[u8], h: usize, w: usize) -> Vec<u8> {
 }
 
 /// cv2.matchTemplate(image=red_patch, templ=blue_patch, TM_CCOEFF_NORMED) の返り値を、
-/// 整数和から厳密に再現する。
+/// 整数和から再現する（OpenCV の f32 累積とは 1〜数 ulp の丸め差が出る）。
 ///
 /// 実機検証済みの縮退分散挙動（uint8 入力なので分散ゼロは浮動小数イプシロンではなく厳密な
 /// 整数一致で判定できる）:

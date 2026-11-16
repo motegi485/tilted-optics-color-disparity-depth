@@ -64,7 +64,7 @@ def model(z, v, u):
 def _fit_branch(depths, zero_disp, label):
     """1枝（pos または neg）の curve_fit。戻り値 (v, u, 残差RMS[px])。
 
-    p0/maxfev は先行実装（TiltedOpticsDepthIntro）と同じ値にして、結果を比較しやすくする。
+    初期値 p0 と最大反復回数 maxfev は固定値にして、同じ入力から同じ結果が得られるようにする。
     """
     popt, _ = optimize.curve_fit(
         model, depths, zero_disp, p0=[400000, 50], maxfev=10000)

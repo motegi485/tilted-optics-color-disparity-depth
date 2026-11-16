@@ -27,10 +27,10 @@ BASELINE_PARAMS_PATH = BASELINE_DIR / "fit_result.csv"
 IMAGE_SIZE = (528, 352)
 
 # ===== 視差算出 (core/disparity.py へ注入) =====
-# 以下 3 つは、精度と計算時間・有効画素数のバランスを見て実験的に選んだ値
-KERNEL_SIZE = 25         # ZNCC 窓の一辺 [px]（奇数）。小さいとノイズに弱く、大きいと窓内の視差変化で推定が鈍る。528×352 で精度が頭打ちになる大きさ
-SEARCH_RANGE_X = 41      # 水平探索幅 [px]（奇数）。探索範囲は ±(S-1)/2 = ±20 px。対象距離（約 1〜4 m）の予測最大視差は約 14 px で、それに余裕を持たせた値
-EDGE_TH = 20            # 縦エッジとみなす水平勾配強度（0〜255）の下限。校正・推論で統一。int のまま（解析ツールの視差キャッシュのキー "T20" と一致させる）
+# KERNEL_SIZE と EDGE_TH は、精度と計算時間・有効画素数のバランスを見て実験的に選んだ値
+KERNEL_SIZE = 25         # ZNCC 窓の一辺 [px]（奇数）。この画像サイズ（528×352）で実験的に最も精度が良かった大きさ
+SEARCH_RANGE_X = 41      # 水平探索幅 [px]（奇数）。探索範囲は ±(S-1)/2 = ±20 px（ピークを探せるのは両端を除く約 ±19.5 px まで）。対象距離（約 1〜4 m）の予測最大視差は約 14 px で、それに余裕を持たせた値
+EDGE_TH = 20            # 縦エッジとみなす水平勾配強度（0〜255）の下限。校正・推論で統一
 
 # ===== ゲーティング (evaluate/pipeline 層で適用) =====
 DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 20。search 半幅と一致。ZNCC の到達上限は 19.5 px なので実質不発（推論帯の上限に吸収）。安全網として維持
@@ -47,7 +47,7 @@ EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====
 # 生ピクセルを (disparity, row) として抽出する際の |d| のゲート [px]
 DISP_PLOT_LOW    = 0.45   # POF 近傍の不感帯（小視差）を除外
-DISP_PLOT_HEIGHT = 7.5    # 過大視差（探索端の誤マッチ）を除外
+DISP_PLOT_HEIGHT = 7.5    # 大視差側で誤マッチが増え、推定が不安定になる領域を除外
 
 # ===== キャリブレーション: RANSAC 直線フィット =====
 RANSAC_RESIDUAL_TH  = 8.0  # インライヤ残差閾値 [row]。None なら sklearn の MAD 自動
@@ -71,4 +71,4 @@ SESSION_VIDEO_DEPTH_NAME = "video_depth.mp4"  # outputs/{session}/ 直下（表�
 # ===== 機材設定値 =====
 # 以下 2 つは撮影条件を記録しておくためのメタデータで、計算には使われない（コード中のどこからも参照していない）
 TILT_THETA_DEG = 30.0  # レンズ傾斜角θ [deg]
-CAMERA_HEIGHT_MM = 245.0  # カメラの設置高さ [mm]
+CAMERA_HEIGHT_MM = 245.0  # 撮影条件のメモ（高さの基準は未確定。計算には使われない）

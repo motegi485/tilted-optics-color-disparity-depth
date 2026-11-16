@@ -7,7 +7,7 @@ Python↔Rust の同条件比較の基礎データを取る。負荷は E(エッ
 実行:
     uv run python -m checks.bench_disparity --source synthetic
     uv run python -m checks.bench_disparity --source test
-    uv run python -m checks.bench_disparity --source captures --session clip92
+    uv run python -m checks.bench_disparity --source captures --session <name>
 """
 # --- checks/ から root の config / core / realtime を import するためのブートストラップ ---
 import sys

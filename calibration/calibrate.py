@@ -4,8 +4,9 @@ calibration/calibrate.py
 校正画像（ファイル名 = 距離[mm]。.png/.jpg/.jpeg。同一の校正撮影内での規格混在は下の入力ガードが拒否）から符号付き視差を求め、符号別に per-pixel RANSAC で
 直線 row = a·disparity + b をフィットし、各距離の zero_disp(=切片 b)・傾き a・
 インライヤ率・点数を params/params.csv に出力する。
-（先行実装 TiltedOpticsDepthIntro の校正手順＝画素ごとに ZNCC 視差を求め、行と視差の関係を直線で
-  当てはめる処理を元に、RANSAC で外れ値に頑健にしたもの）
+（先行実装 TiltedOpticsDepthIntro の校正手順＝視差を求め、行と視差の関係を直線で当てはめて、
+  視差 0 の行を各距離で得る流れに沿う。先行実装は行ごとに視差を平均してから頑健損失で直線を当てるが、
+  ここでは平均せず、画素ごとの点群に RANSAC で直線を当てる）
 
 パイプライン: 校正画像 → 視差(core/disparity) → 符号別の点群抽出 → RANSAC 直線フィット → params.csv
 後段の fit_params.py が params.csv を受け取り、参照式 y0 = v/z + u をフィットする。

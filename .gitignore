@@ -19,6 +19,9 @@ Thumbs.db
 # Rust build artifacts
 target/
 
+# ローカルの作業用ディレクトリ（追跡しない）
+/project_knowledge/
+
 # AI エージェント用のローカル設定
 .claude/settings.local.json
 CLAUDE.local.md

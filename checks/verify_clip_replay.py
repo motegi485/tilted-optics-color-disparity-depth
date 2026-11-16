@@ -13,9 +13,9 @@ preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化な
 
 params は録画時と同じものを使う必要がある。--params 未指定時は outputs/{session}/meta.json
 （録画開始時に runner.py が書く）があればその params_path を自動採用し、無ければ
-live＝root fit_result.csv を既定とする。--params を明示指定すれば常にそちらが優先される。
-webcam の再校正より前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
-いるため、再検証時は --params params/baseline/fit_result.csv を明示すること。
+params/fit_result.csv を既定とする。--params を明示指定すれば常にそちらが優先される。
+meta.json が無いセッション（古い録画）で、回帰用の旧係数 params/baseline/fit_result.csv で録画したものは、
+再検証時に --params params/baseline/fit_result.csv を明示すること。
 
 実行: uv run python -m checks.verify_clip_replay --session 20260624_153000
 """
