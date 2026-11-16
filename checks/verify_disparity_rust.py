@@ -1,8 +1,10 @@
-"""checks/verify_disparity_rust.py — 高速化（Rust移植）段階の受入基準1,2（project_knowledge/modules/module-core.md）の照合ゲート。
+"""checks/verify_disparity_rust.py — Rust 実装と Python 参照実装の視差照合ゲート（Rust 移植の正当性確認）。
 
 core._disparity_reference（凍結 Python 参照実装）と _rt_disparity_native（Rust 実装）を
-同一入力で実行し、NaN 位置の完全一致と視差値の一致（project_knowledge/modules/module-core.md に記載の受入基準2・2026-09-05 改定の
-主基準 max|Δd| <= 1e-3px ＋ 副基準「|Δd| > 1e-4px の画素率 <= 0.05%」）を検証する。
+同一入力で実行し、次の2点を検証する。
+  1. NaN 位置（無効画素）の完全一致
+  2. 視差値の一致（二段判定: 視差差の最大値 max|Δd| <= 1e-3px、かつ
+     「|Δd| > 1e-4px の画素率 <= 0.05%」）
 あわせて Rust の sequential(parallel=False) vs parallel(True) の決定論一致も確認する
 （rayon 並列化がデータ競合なく同じ結果を返すことの根拠）。
 
@@ -10,8 +12,8 @@ core._disparity_reference（凍結 Python 参照実装）と _rt_disparity_nativ
   - tests/test_core.py 由来の合成パターン（既知シフト・平坦blue）
   - 敵対的入力（全面平坦・templ側飽和隣接エッジ・周期縞・極小画像・縮退パラメータ・
     閾値で全画素除外）
-  - data/test/*.jpg・data/captures/*/ の実写コーパス（project_knowledge/modules/module-core.md の基準1-3。既定では0件を exit 2 と
-    して受入不成立にする。実データを持たない開発機では --allow-synthetic-only を明示する）
+  - data/test/*.jpg・data/captures/*/ の実写コーパス（既定では0件を exit 2 として
+    照合不成立にする。実データを持たない開発機では --allow-synthetic-only を明示する）
 
 実行: uv run python -m checks.verify_disparity_rust
       uv run python -m checks.verify_disparity_rust --allow-synthetic-only   # 実データ無し環境
@@ -29,26 +31,26 @@ import numpy as np
 import config
 from core._disparity_reference import calcDisparityByZNCC as calc_python
 
+# Rust 拡張が無い環境でも、このモジュールの import（pytest の収集を含む）は失敗させない。
+# 実行時（main）にだけ、導入手順を示して終了する。
 try:
     import _rt_disparity_native as native
+    _NATIVE_IMPORT_ERROR = None
 except ImportError as e:
-    print(f"[FATAL] _rt_disparity_native が見つかりません: {e}")
-    print("  rust/disparity/ で `maturin build --release --interpreter ../../.venv/Scripts/python.exe` -> "
-          "`uv pip install (Get-ChildItem target/wheels/*.whl).FullName` を実行してください。")
-    sys.exit(2)
+    native = None
+    _NATIVE_IMPORT_ERROR = e
 
 K, S, TH = config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH
 
-# project_knowledge/modules/module-core.md の受入基準2【2026-09-05 改定】。Rust は ZNCC を f64 で除算して f32 化し、OpenCV
+# 視差値の許容差（二段判定）。Rust は ZNCC を f64 で除算して f32 化し、OpenCV
 # matchTemplate は f32 で計算するため両者は概ね 1 ULP 差になる。サブピクセル項
 # (sim_pos - sim_neg) / (4*sim_peak - 2*sim_neg - 2*sim_pos) はこの差を分母の逆数倍に
 # 増幅し、ピークが平坦（分母→0）な画素では増幅率に上限が無い。したがって単一の
-# max|Δd| 閾値では余裕を保証できない（実測: 分母 0.00279 の画素で |Δd|=1.049e-4px）。
-# 主基準で外れ値の大きさを、副基準でその発生率を抑える二段構成にする。
-MAX_DELTA_TOL = 1e-3        # px。主基準（実測最大 1.049e-4px に対し約9.5倍の余裕）
+# max|Δd| 閾値では余裕を保証できない。
+# 主基準（視差差の最大値）で外れ値の大きさを、副基準（閾値超過の画素率）でその発生率を抑える二段構成にする。
+MAX_DELTA_TOL = 1e-3        # px。主基準: max|Δd| の上限
 FINE_DELTA_TOL = 1e-4       # px。副基準が数える「粗い差分」の下限
-OVER_FINE_RATE_MAX = 5e-4   # 副基準: |Δd|>FINE_DELTA_TOL の画素率上限 0.05%
-                            # （fixture 単位。実測最悪 1/12,299=0.0081% に対し約6倍の余裕）
+OVER_FINE_RATE_MAX = 5e-4   # 副基準: |Δd|>FINE_DELTA_TOL の画素率上限 0.05%（fixture 単位）
 
 
 def calc_rust(red, blue, k, s, th, parallel):
@@ -76,7 +78,7 @@ def synthetic_fixtures():
         blue = _make_shift_pattern(width, height, edge_col - shift)
         fx.append((f"known_shift_{shift}", red, blue, K, S, TH))
 
-    # 平坦blue（飽和含む）: templ側分散ゼロの縮退分岐（project_knowledge/modules/module-core.md・全シフトタイでNaN想定）
+    # 平坦blue（飽和含む）: templ側分散ゼロの縮退分岐（全シフトがタイになり NaN となる想定）
     for blue_const in [0, 128, 255]:
         height, width = 60, 100
         red = np.full((height, width), 50, dtype=np.uint8)
@@ -133,8 +135,8 @@ def real_corpus_fixtures():
     """data/test/*.jpg・data/captures/*/ の実写コーパス。無ければ空リストを返す（FAILにしない）。
 
     captures は各セッションの先頭1フレームのみのサンプリング照合（Python 参照実装が
-    ≈数秒〜数十秒/frame かかるため）。クリップ全フレームの再現一致は、タイ→NaN 化（C-1）
-    以後に再録画したセッションに対する checks/verify_clip_replay.py の役割（project_knowledge/requirements/requirements.md）。
+    ≈数秒〜数十秒/frame かかるため）。クリップ全フレームの再現一致は、同点（タイ）を NaN 化する
+    仕様になって以後に再録画したセッションに対する checks/verify_clip_replay.py の役割。
     """
     fx = []
     for path in sorted(config.TEST_DIR.glob("*.jpg", case_sensitive=False)):
@@ -206,7 +208,7 @@ def _requires_valid(name):
 
     既知シフト（正解の視差が存在する合成入力）と実写コーパスは、両実装が揃って全 NaN を
     返しても「NaN 位置一致・max|Δd|=0」で合格してしまう。相互一致は共通退行を検出できない
-    ため、これらだけは有効画素数>0 を独立した合格条件として課す（2026-09 レビュー）。
+    ため、これらだけは有効画素数>0 を独立した合格条件として課す。
     全面平坦など「全 NaN が正解」の縮退 fixture は対象外。
     """
     return name.startswith(("known_shift_", "test/", "captures/"))
@@ -229,14 +231,20 @@ def main(argv: list[str] | None = None):
             pass
 
     parser = argparse.ArgumentParser(
-        description="project_knowledge/modules/module-core.md 受入基準1,2 の Rust↔Python 照合ゲート")
+        description="Rust↔Python 視差照合ゲート（NaN 位置の完全一致＋視差値の許容差）")
     parser.add_argument("--allow-synthetic-only", action="store_true",
-                        help="実写コーパスが0件でも受入不成立(exit 2)にしない。実データを持たない"
-                             "開発機での動作確認用。project_knowledge/modules/module-core.md の基準1-3 は未検証のまま残る")
+                        help="実写コーパスが0件でも照合不成立(exit 2)にしない。実データを持たない"
+                             "開発機での動作確認用。実写コーパスでの照合は未検証のまま残る")
     args = parser.parse_args(argv)
 
+    if native is None:
+        print(f"[FATAL] _rt_disparity_native が見つかりません: {_NATIVE_IMPORT_ERROR}")
+        print("  rust/disparity/ で `maturin build --release --interpreter ../../.venv/Scripts/python.exe` -> "
+              "`uv pip install (Get-ChildItem target/wheels/*.whl).FullName` を実行してください。")
+        return 2
+
     print(f"_rt_disparity_native.__version__ = {native.__version__}")
-    print(f"受入基準2（project_knowledge/modules/module-core.md・2026-09-05 改定）: 主 max|Δd| <= {MAX_DELTA_TOL:.0e}px / "
+    print(f"視差値の許容差（二段判定）: 主 max|Δd| <= {MAX_DELTA_TOL:.0e}px / "
           f"副 |Δd|>{FINE_DELTA_TOL:.0e}px の画素率 <= {OVER_FINE_RATE_MAX * 100:.2f}%")
 
     synth_fx = synthetic_fixtures()
@@ -244,7 +252,7 @@ def main(argv: list[str] | None = None):
     print(f"合成・敵対的フィクスチャ: {len(synth_fx)}件  実写コーパス: {len(real_fx)}件")
     if not real_fx and args.allow_synthetic_only:
         print("[NOTE] data/test・data/captures が空のため実写コーパス照合はスキップ"
-              "（--allow-synthetic-only 指定。project_knowledge/modules/module-core.md の受入基準1-3 はデータ復元後に "
+              "（--allow-synthetic-only 指定。実写コーパスでの照合はデータ復元後に "
               "`uv run python -m checks.verify_disparity_rust` を再実行して確認すること）")
 
     results = []
@@ -270,7 +278,7 @@ def main(argv: list[str] | None = None):
 
     # 契約チェック（native 単体の防御動作。ラッパー core/disparity.py の契約は
     # tests/test_core.py が担う）: 偶数値・形状不一致は ValueError、空画像は panic せず
-    # 空の全NaNマップを返す（w=0×kernel_size=1 で par_chunks_mut(0) panic していた回帰・2026-07-13）
+    # 空の全NaNマップを返す（w=0×kernel_size=1 で par_chunks_mut(0) が panic しないことの回帰確認）
     contract_failures = []
     img = np.zeros((40, 100), dtype=np.uint8)
 
@@ -309,10 +317,10 @@ def main(argv: list[str] | None = None):
         return 1
 
     if not real_fx:
-        # 実写コーパス0件は「合格」ではなく「受入不成立」。合成onlyの成功と project_knowledge/modules/module-core.md の受入完了を
-        # 終了コードで機械的に弁別できるようにする（2026-09 レビュー。旧実装はここで PASS/exit 0
-        # を返していたため、実写検証の欠落を自動化から検知できなかった）。
-        print("[PARTIAL] 合成・敵対的入力での正当性検証は完了。実写コーパス(project_knowledge/modules/module-core.mdの基準1-3)は未検証。")
+        # 実写コーパス0件は「合格」ではなく「照合不成立」。合成のみの成功と、実写を含む照合の完了を
+        # 終了コードで機械的に弁別できるようにする（ここで exit 0 を返すと、実写検証の欠落を
+        # 自動化から検知できない）。
+        print("[PARTIAL] 合成・敵対的入力での正当性検証は完了。実写コーパスでの照合は未検証。")
         if not args.allow_synthetic_only:
             print("[ERROR] 実写コーパスが0件です。data/test・data/captures を復元してから"
                   "再実行してください（意図的に合成のみで確認する場合は "
@@ -321,7 +329,7 @@ def main(argv: list[str] | None = None):
         return 0
 
     print(f"PASS: 全フィクスチャ（実写{len(real_fx)}件を含む）で Rust版とPython参照版が"
-          f"project_knowledge/modules/module-core.md の受入基準1,2 を満たし、並列/逐次の決定論も確認できた")
+          f"NaN 位置の完全一致と視差値の許容差を満たし、並列/逐次の決定論も確認できた")
     return 0
 
 

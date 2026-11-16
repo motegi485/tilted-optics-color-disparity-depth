@@ -1,6 +1,6 @@
 """tools/w_offset_sim.py — w=0 固定と深度原点（センサ面 vs レンズ面）のずれの影響を数値で確認する。
 
-背景（project_knowledge/architecture/theory.md「w = 0 固定について」）:
+背景:
   経験式 z = v/(y − ā·d − u) + w は w=0 に固定している。視差 0 の行 y0(z) = v/z + u は、
   合焦面（y–z 断面では直線）の透視投影から従う逆距離型で、z を投影中心（レンズ面近傍）から
   測る場合に厳密に成り立つ。本システムは z をセンサ面から測るため、レンズ面との原点差 δ
@@ -9,11 +9,11 @@
 何をするか:
   真の関係を y0 = A/(z − δ) + B とみなして校正距離ごとに y0 を生成し、w=0 の v/z + u を
   最小二乗でフィットしたときの残差 [px] と、それを深度に換算した誤差 [mm] を出す。
-  ノイズは入れない（形の不一致だけを見る）。A, B は現行の live 係数（fit_result.csv）の曲線に
+  ノイズは入れない（形の不一致だけを見る）。A, B は現行の係数（params/fit_result.csv）の曲線に
   校正範囲の両端で一致するように決める（＝現行の校正結果と同じ位置に合焦面がある前提）。
 
 用途:
-  論文・docs で「w=0 と原点ずれの影響は校正範囲内でどの程度か」を述べるための根拠。
+  w=0 固定の妥当性（原点ずれの影響が校正範囲内でどの程度か）を数値で確認する理論補足。
   結果は係数と校正範囲に依存するので、再校正したら再実行して数値を更新する。
   本番の処理経路（core/・realtime/・calibration/）には含まれず、係数・回帰アンカーを変更しない。
 
@@ -45,7 +45,7 @@ try:
 except Exception:
     pass
 
-# 校正キャンペーン（live）の距離レンジの既定値。project_knowledge/modules/module-calibration.md「既知のパラメータセット」live 節。
+# 現行の校正（実機撮影）で使った距離レンジの既定値 [mm]。
 DEFAULT_Z_MIN_MM = 1400
 DEFAULT_Z_MAX_MM = 3200
 DEFAULT_Z_STEP_MM = 200
@@ -62,7 +62,7 @@ def simulate(z_mm: np.ndarray, v: float, u: float, delta_mm: float) -> dict:
 
     Args:
         z_mm:     校正距離 [mm]（センサ面基準）。1 次元・3 点以上・すべて δ より大きいこと。
-        v, u:     現行 live 係数（同一符号枝の v, u）。y_live(z) = v/z + u が「現行の合焦面位置」。
+        v, u:     現行の係数（同一符号枝の v, u）。y_live(z) = v/z + u が「現行の合焦面位置」。
         delta_mm: 深度原点の差 δ [mm]。真の関係を y0 = A/(z − δ) + B とみなす。
 
     Returns:
@@ -84,10 +84,10 @@ def simulate(z_mm: np.ndarray, v: float, u: float, delta_mm: float) -> dict:
     if np.any(z <= delta_mm):
         raise ValueError(f"すべての z_mm が delta_mm={delta_mm} より大きい必要があります（min z={z.min()}）")
 
-    # 現行 live 曲線（w=0）。これを「現行の校正結果が示す合焦面位置」とみなす。
+    # 現行の曲線（w=0）。これを「現行の校正結果が示す合焦面位置」とみなす。
     y_live = _w0_model(z, v, u)
 
-    # 真のモデル y = A/(z − δ) + B を、校正範囲の両端で live 曲線に一致させる。
+    # 真のモデル y = A/(z − δ) + B を、校正範囲の両端で現行の曲線に一致させる。
     f = 1.0 / (z - delta_mm)
     if f[0] == f[-1]:
         raise ValueError("校正範囲の両端が同一で A を決められません")
@@ -139,7 +139,7 @@ def format_result(sign: str, res: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="w=0 固定と深度原点（センサ面 vs レンズ面）のずれ δ の影響を、現行 live 係数で数値確認する")
+        description="w=0 固定と深度原点（センサ面 vs レンズ面）のずれ δ の影響を、現行の係数（params/fit_result.csv）で数値確認する")
     parser.add_argument("--params", default=str(config.PARAMS_PATH),
                         help=f"fit_result.csv のパス（既定: {config.PARAMS_PATH}）")
     parser.add_argument("--delta", type=float, nargs="+", default=list(DEFAULT_DELTAS_MM),

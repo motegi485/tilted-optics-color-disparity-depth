@@ -21,8 +21,8 @@ from core.params import load_params
 # 回帰アンカー（K25/S41/T20・推論帯 (0.45, 5)・DEPTH_MAX=5000・params/baseline/ 前提）。
 # baseline 係数は旧設定の静止画校正値のままなので、距離の物理的な正しさではなく
 # 「計算経路が変わっていないこと」を検出するためのアンカーである。
-# 距離範囲ゲート（0 < z < DEPTH_MAX）の上限を 50000 から 5000 に変更した際に取り直した
-# （50000 のときの値は 平均 2213.4 / MAE 218.9 / 有効画素 6339）。
+# 期待値は距離範囲ゲート（DEPTH_MIN < z < DEPTH_MAX）の上限が 5000 のときの値。
+# config の上限や推論帯を変えたら取り直すこと。
 EXPECTED = {
     "2300.jpg": {"mean": 2200.5, "mae": 207.1, "valid": 6318},
 }
@@ -42,10 +42,10 @@ def evaluate(image_path: Path, params, gt_distance: int):
                                config.SEARCH_RANGE_X,
                                config.EDGE_TH)
 
-    # ゲート1: 探索半幅超の視差を無効化（core の外で適用）
+    # 視差上限ゲート: 探索半幅超の視差を無効化（core の外で適用）
     disp[np.abs(disp) > config.DISP_MAX] = np.nan
 
-    # 推論帯（2026-09-18 新設）: |d| <= INFER_BAND_LOW または |d| >= INFER_BAND_HIGH を無効化（pipeline と同一手順）
+    # 推論帯: |d| <= INFER_BAND_LOW または |d| >= INFER_BAND_HIGH を無効化（pipeline と同一手順）
     abs_disp = np.abs(disp)
     disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
 
@@ -56,7 +56,7 @@ def evaluate(image_path: Path, params, gt_distance: int):
         config.EPS_DEN,
     )
 
-    # ゲート2: Z レンジ外を除外（NaN は比較で False となり自然に除外）
+    # 距離範囲ゲート: Z レンジ外を除外（NaN は比較で False となり自然に除外）
     valid = depth[(depth > config.DEPTH_MIN) & (depth < config.DEPTH_MAX)]
     if valid.size == 0:
         raise RuntimeError(f"{image_path.name}: 有効推定距離が0件")

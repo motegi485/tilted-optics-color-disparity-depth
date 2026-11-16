@@ -7,7 +7,7 @@ video_raw.mp4 / video_depth.mp4 を、フレーム同期で「同時再生」す
   Windows 標準プレイヤーは 1 プロセス 1 本再生で、2 本を同時に開いても開始点を
   揃えられず、各々が独立クロックで走るため再生位置がドリフトする。本ツールは両動画を
   「同一フレーム番号でロックステップ」に描画するので、開始点が完全に揃い以後もずれない
-  （＝生映像と深度マップを並べて計算遅延を見る、という録画目的に一致・project_knowledge/modules/module-realtime.md）。
+  （＝生映像と深度マップを並べて計算遅延を見る、という録画の目的に一致する）。
 
 同期の根拠:
   2 本は設計上フレーム数・fps が一致する（runner の 1 tick = 両方書く/両方スキップの
@@ -16,11 +16,11 @@ video_raw.mp4 / video_depth.mp4 を、フレーム同期で「同時再生」す
 
 依存: opencv-python, numpy のみ（uv 環境の既存依存で動く）。
 
-実行例（PowerShell / uv・Windows 11）:
-    uv run python tools/play_session_videos.py                         # 最新セッションを自動選択
-    uv run python tools/play_session_videos.py --session 20260710_101530
-    uv run python tools/play_session_videos.py --raw path\to\video_raw.mp4 --depth path\to\video_depth.mp4
-    uv run python tools/play_session_videos.py --session 20260710_101530 --export  # 合成を1本のmp4に書き出して終了
+実行例（リポジトリ root・PowerShell / uv・Windows 11）:
+    uv run python -m tools.play_session_videos                         # 最新セッションを自動選択
+    uv run python -m tools.play_session_videos --session 20260710_101530
+    uv run python -m tools.play_session_videos --raw path\to\video_raw.mp4 --depth path\to\video_depth.mp4
+    uv run python -m tools.play_session_videos --session 20260710_101530 --export  # 合成を1本のmp4に書き出して終了
 
 操作:
     SPACE     再生 / 一時停止

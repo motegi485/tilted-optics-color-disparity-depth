@@ -1,16 +1,20 @@
-"""tools/analyze_resolution.py — 処理解像度 IMAGE_SIZE の最適化（設定値の最適化実験 B3・2026-09-18）。
+"""tools/analyze_resolution.py — 処理解像度 IMAGE_SIZE の感度解析。
+
+これは処理解像度の感度解析の実験例で、実行には自前の撮影データ（data/calib_raw, data/captures など）と、
+列 session,gt_mm の manifest CSV（セッション名と正解距離 [mm]）が要る。
 
 校正 raw（`capture_calib --save-raw` が `data/calib_raw/<距離>.png` に残す 1280×720 のバースト平均）と評価 raw
 （`data/captures/<session>/<idx>.png`）から、処理解像度ごとに校正画像・評価フレームを `preprocess_to` で作り直し、
   K・S を解像度比 r = W/528 でスケール（K' = round_to_odd(K·r)、S' = round_to_odd(S·r)。T は既定で固定・--scale-edge-th で T/r）
   → 校正帯 (low·r, high·r)・RANSAC 閾値 th·r で校正（tools.analysis_common.calibrate_from_disparity）
-  → 距離別精度（群: interior／at_calib／extrap × ゲート: nogate／bandgate）・有効画素率・σ_d・計算時間
+  → 距離別精度（群: interior／at_calib／extrap × 推論ゲート: nogate＝なし／bandgate＝校正帯）・有効画素率・σ_d・計算時間
 を解像度ごとに 1 行にまとめる（tools.analysis_common のキャッシュを使うので同じ解像度の再実行は速い）。
 
-校正距離のサブセットは --calib-distances で選ぶ。16 距離（1000〜4000 mm）のうち 1000・1100 mm は neg 枝の合焦行が
-画面下端の外にあり点が無く（calibrate と同じ規則で距離ごとスキップ）、1200 mm も僅かなので、単純平均の ā を汚しうる。
-どの距離を校正に使うかは calib_rows.csv（距離ごとの点数・傾き・インライヤ率）を見てユーザーが決める。
-判断（精度 vs 密度 vs 速度）はユーザー。config.py は読むだけで書き換えない。
+校正距離のサブセットは --calib-distances で選ぶ。近距離側の校正距離では neg 枝の合焦行が画面下端の外にあって
+点が無く（calibrate と同じ規則で距離ごとスキップ）、点が僅かな距離も単純平均の ā を汚しうる。
+どの距離を校正に使うかは calib_rows.csv（距離ごとの点数・傾き・インライヤ率）を見て決める。
+精度・有効画素の密度・計算時間のトレードオフの判断は利用者に委ね、このスクリプトは比較表を出すだけ。
+config.py は読むだけで書き換えない。
 
 出力（--out-dir、既定 outputs/analysis/resolution_<日時>/）:
   settings.csv（1 行＝1 解像度）/ calib_rows.csv（解像度 × 校正距離・params.csv と同じ列）/
@@ -223,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="処理解像度の最適化（B3）: raw から解像度別に校正・評価・計時")
+    parser = argparse.ArgumentParser(description="処理解像度の感度解析: raw から解像度別に校正・評価・計時")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--sessions", nargs="+", metavar="NAME")
     src.add_argument("--manifest", metavar="CSV")
@@ -234,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image-sizes", nargs="*", default=DEFAULT_SIZES, help="WxH（3:2）。小さい順に処理する")
     parser.add_argument("--base-kernel", type=int, default=config.KERNEL_SIZE, help="528x352 での K（解像度比でスケール）")
     parser.add_argument("--base-search-range", type=int, default=config.SEARCH_RANGE_X,
-                        help="528x352 での S（解像度比でスケール。B3 では 41 を明示）")
+                        help="528x352 での S（解像度比でスケール。現行の config の値は 41）")
     parser.add_argument("--edge-th", type=float, default=float(config.EDGE_TH))
     parser.add_argument("--scale-edge-th", action="store_true", help="T も T/r にスケールする（既定: 固定）")
     parser.add_argument("--band-low", type=float, default=config.DISP_PLOT_LOW, help="528x352 での校正帯下限 [px]")

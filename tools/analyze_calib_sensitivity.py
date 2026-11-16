@@ -1,18 +1,21 @@
-"""tools/analyze_calib_sensitivity.py — 校正帯・RANSAC・推論ゲートのグリッド探索（設定値の最適化実験 Phase A2・A4）。
+"""tools/analyze_calib_sensitivity.py — 校正帯・RANSAC・推論ゲートのグリッド探索（設定値の感度解析）。
+
+これは設定値の感度解析の実験例で、実行には自前の撮影データ（data/captures, data/calib_imgs など）と、
+列 session,gt_mm の manifest CSV（セッション名と正解距離 [mm]）が要る。
 
 校正帯（DISP_PLOT_LOW < |d| < DISP_PLOT_HEIGHT）と RANSAC 残差閾値を振って校正し直し、各設定の 8 係数で
 校正と独立な距離（held-out）の精度を評価する。視差は設定に依存しないので、視差キャッシュ
 （tools.analysis_common）を読むだけで何十通りでも回せる。
 
   1. grid: low × high（--lows × --highs）を RANSAC 閾値 --th で校正 → held-out／外挿の指標。推論ゲートは
-     「なし（現行）」と「校正帯と同じ」の両方で評価する（A4 の主要 2 案を同時に済ませる）。
+     「なし（現行）」と「校正帯と同じ」の両方で評価する。
   2. th sweep: grid で最良だった (low, high) を固定し、RANSAC 閾値 --ths（None＝sklearn の MAD 自動）を振る。
   3. inference band: 校正帯を固定（--fixed-low/--fixed-high、既定は grid の最良）し、推論側の帯 (low′, high′) を
-     独立に振る（A4 の第 3 案）。校正はしない。
+     独立に振る（推論ゲートを校正帯と別にする案）。校正はしない。
   4. residual: 現行帯で当てた RANSAC 直線に対する残差を、帯の外側の画素も含めて |d| 0.25 px 刻みで集計する
      （小視差域の系統的ずれ・大視差域の残差増大を定量化。校正帯の理論的解釈の材料）。
 
-「最良」の既定は held-out の MAE 平均（--objective で abs_bias_max / rmse_mean に変更可）。判断はユーザー。
+「最良」の既定は held-out の MAE 平均（--objective で abs_bias_max / rmse_mean に変更可）。どれを採るかは利用者が判断する。
 
 出力（--out-dir、既定 outputs/analysis/calib_sensitivity_<日時>/）:
   grid.csv / th_sweep.csv / inference_band.csv / residual_vs_disparity.csv / summary.json / heatmap_*.png
@@ -190,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="校正帯・RANSAC・推論ゲートのグリッド探索（A2・A4）")
+    parser = argparse.ArgumentParser(description="校正帯・RANSAC・推論ゲートのグリッド探索")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--sessions", nargs="+", metavar="NAME")
     src.add_argument("--manifest", metavar="CSV")

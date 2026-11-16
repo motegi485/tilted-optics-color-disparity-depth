@@ -25,7 +25,7 @@ def compute_depth(disp_map, v_pos, u_pos, a_pos, w_pos, v_neg, u_neg, a_neg, w_n
         各距離の直線傾き a の平均値 ā。d > 0 側。
     w_pos : float
         参照式の定数項 w。d > 0 側。
-        理論的根拠により 0 固定（project_knowledge/architecture/theory.md の「経験式（参照式）」の節）。
+        実験的に 0 としている（2 パラメータモデル z = v/(y - a·d - u)）。
         論文式との対応・将来拡張のため引数として保持。
     v_neg : float
         参照式の v パラメータ。d < 0 側。
@@ -35,7 +35,7 @@ def compute_depth(disp_map, v_pos, u_pos, a_pos, w_pos, v_neg, u_neg, a_neg, w_n
         各距離の直線傾き a の平均値 ā。d < 0 側。
     w_neg : float
         参照式の定数項 w。d < 0 側。
-        理論的根拠により 0 固定（project_knowledge/architecture/theory.md の「経験式（参照式）」の節）。
+        実験的に 0 としている（2 パラメータモデル z = v/(y - a·d - u)）。
         論文式との対応・将来拡張のため引数として保持。
     eps_den : float
         分母ゼロガードの閾値 [px]。
@@ -46,7 +46,7 @@ def compute_depth(disp_map, v_pos, u_pos, a_pos, w_pos, v_neg, u_neg, a_neg, w_n
     depth_map : np.ndarray, shape (H, W), dtype float32
         距離マップ [mm]。下記の画素は NaN:
         - d が NaN  （マッチング失敗 / 事前クリップ済み）
-        - d == 0    （POF 上・不感帯）
+        - d == 0    （合焦面（POF: Plane Of Focus）上・不感帯）
         - |分母| < eps_den  （発散危険）
     """
     # y 座標を (H, 1) で作る。(H, W) の disp_map とブロードキャストさせることで、

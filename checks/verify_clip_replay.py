@@ -1,20 +1,20 @@
-"""verify_clip_replay.py — project_knowledge/requirements/requirements.md のクリップ再生・再現一致の検証(root・camera.py 非依存)。
+"""verify_clip_replay.py — 保存クリップの再生で、ライブ実行の depth が再現できることの検証(root・camera.py 非依存)。
 
 ライブ実行で保存した outputs/{session}/{i}.npy(depth・唯一の真実)と、同じ
 captures/{session}/{i}.png を preprocess -> process_frame で再計算した depth が、
 全フレームで NaN 位置＋有限値ともビット一致するかを照合する。
 
-PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える・2026-10-30 追加）。
+PNG と npy の対応は両方向で確かめる（npy の無い PNG も、PNG の無い npy も不一致に数える）。
 preprocess も process_frame も決定的(乱数なし)で、PNG は無劣化なので、再計算 depth は
 ライブ depth とビット一致するはず。一致＝録画→再生の経路が無劣化で、ライブ結果が保存
-クリップから完全再現可能(高速化段階の Python<->Rust 照合〈project_knowledge/implementation/verification-and-tools.md〉の土台)であることの回帰確認。
+クリップから完全再現可能(Python<->Rust 照合の土台)であることの回帰確認。
 照合ロジックは verify_pipeline_equivalence.py と同じ流儀(NaN 位置一致を確認して
 から有限値をビット比較)。
 
 params は録画時と同じものを使う必要がある。--params 未指定時は outputs/{session}/meta.json
 （録画開始時に runner.py が書く）があればその params_path を自動採用し、無ければ
 live＝root fit_result.csv を既定とする。--params を明示指定すれば常にそちらが優先される。
-webcam 再校正（2026-07-03）以前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
+webcam の再校正より前に録画したセッション(例: clip92)は meta.json が無く baseline params で録画されて
 いるため、再検証時は --params params/baseline/fit_result.csv を明示すること。
 
 実行: uv run python -m checks.verify_clip_replay --session 20260624_153000
@@ -46,7 +46,7 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
         return False, f"shape 不一致: live={live.shape}, recomputed={recomputed.shape}"
     # np.array_equal は dtype 差を無視して数値等値なら True を返す。canonical な depth は
     # float32（NaN 保持）と定められているので、dtype 一致自体を合否条件に含める
-    # （float64 で保存された npy を「ビット一致」と呼ばないため・2026-09 レビュー）。
+    # （float64 で保存された npy を「ビット一致」と呼ばないため）。
     if live.dtype != np.float32 or recomputed.dtype != np.float32:
         return False, (f"dtype 不一致: live={live.dtype}, recomputed={recomputed.dtype}"
                        f"（canonical は float32）")
@@ -57,7 +57,7 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
         return False, f"NaN 位置不一致: {n} 画素"
     if np.count_nonzero(~nan_live) == 0:
         # 両者とも全 NaN だと空集合同士の比較で match 判定が真になり得るため無条件 FAIL とする
-        # (Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー)。
+        # (空の結果で Rust 照合の土台が成り立ったように見えるのを防ぐ)。
         return False, "有効画素 0 — 入力・params・ゲートを確認"
     # NaN 位置が一致している前提で、有限値(同じマスク)をビット比較する
     if not np.array_equal(live[~nan_live], recomputed[~nan_live]):
@@ -68,7 +68,7 @@ def _compare(live: np.ndarray, recomputed: np.ndarray) -> tuple[bool, str]:
 
 
 # meta.json の "config" に記録される計算設定（runner._write_session_meta と同じキー）。
-# INFER_BAND_* は 2026-09-18 以降のセッションにしか無い（無い＝推論帯なしで録画）。
+# INFER_BAND_* は推論帯の導入後に録画したセッションにしか無い（無い＝推論帯なしで録画）。
 _REPLAY_CONFIG_KEYS = ("IMAGE_SIZE", "KERNEL_SIZE", "SEARCH_RANGE_X", "EDGE_TH", "DISP_MAX",
                        "INFER_BAND_LOW", "INFER_BAND_HIGH")
 _PARAM_KEYS = ("v_pos", "u_pos", "a_pos", "w_pos", "v_neg", "u_neg", "a_neg", "w_neg")
@@ -77,7 +77,7 @@ _PARAM_KEYS = ("v_pos", "u_pos", "a_pos", "w_pos", "v_neg", "u_neg", "a_neg", "w
 def _replay_mismatches(meta: dict, params) -> list[str]:
     """録画時の meta.json と現行 config.py・読み込んだ params の食い違いを列挙する（警告用・判定には使わない）。
 
-    再現一致は録画時と同じ config・係数でしか成立しない（project_knowledge/implementation/known-issues.md #25）。食い違いがあると
+    再現一致は録画時と同じ config・係数でしか成立しない。食い違いがあると
     不一致は「正常」なので、FAIL を回帰と誤読しないよう事前に知らせる。
     """
     out: list[str] = []
@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(description="project_knowledge/requirements/requirements.md のクリップ再生・再現一致の検証")
+    parser = argparse.ArgumentParser(description="保存クリップの再生による depth 再現一致の検証")
     parser.add_argument("--session", required=True,
                         help="セッション名(captures/{session}, outputs/{session} を照合)")
     parser.add_argument("--params", default=None,
@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] {cap_dir} に連番 png(??????.png)がありません")
         return 2
     # 逆方向の照合: raw PNG の無い npy は PNG だけを列挙すると母数から漏れ、残りのフレームだけで
-    # 「全フレーム一致」になってしまう（2026-10-30 監査 IMPL-001）。片方しか無い連番も不一致に数える。
+    # 「全フレーム一致」になってしまう。片方しか無い連番も不一致に数える。
     png_stems = {p.stem for p in pngs}
     orphan_npys = sorted(p for p in out_dir.glob("??????.npy") if p.stem.isdigit() and p.stem not in png_stems)
 
@@ -149,8 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     if meta is not None:
         mismatches = _replay_mismatches(meta, params)
         if mismatches:
-            print("[WARN] 録画時の条件と現行の条件が異なります（このまま照合すると不一致になるのが正常・"
-                  "project_knowledge/implementation/known-issues.md #25）:")
+            print("[WARN] 録画時の条件と現行の条件が異なります（このまま照合すると不一致になるのが正常）:")
             for m in mismatches:
                 print(f"  - {m}")
 
@@ -188,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     total = len(pngs) + len(orphan_npys)
     print(f"\n結果: {n_ok}/{total} フレーム一致")
     if n_ok == total:
-        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= project_knowledge/requirements/requirements.md のクリップ再生・再現一致 達成")
+        print("[PASS] 全フレーム ビット一致(NaN 位置＋有限値)= クリップ再生による再現一致 達成")
         return 0
     print(f"[FAIL] 不一致あり(最初の不一致フレーム: {first_fail})")
     return 1

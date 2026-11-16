@@ -13,7 +13,7 @@ from realtime.pipeline import process_frame
 
 def test_compare_dtype_mismatch_returns_false():
     """live が float64、recomputed が float32 で数値が同一でも dtype 不一致で FAIL 扱い
-    （canonical な depth は float32 のため・2026-09 レビュー）。"""
+    （canonical な depth は float32 のため）。"""
     live = np.array([[1.0, 2.0]], dtype=np.float64)
     recomputed = live.astype(np.float32)
 
@@ -42,7 +42,7 @@ def test_compare_both_all_nan_returns_false():
     assert ok is False
 
 
-# ===== main: PNG と npy の対応（2026-10-30 監査 IMPL-001） =====
+# ===== main: PNG と npy の対応（片方だけ欠けたフレームを見逃さない） =====
 
 _PARAMS = {"v_pos": 432599.33, "u_pos": -63.93, "w_pos": 0.0, "a_pos": -26.57,
            "v_neg": 423627.24, "u_neg": -21.37, "w_neg": 0.0, "a_neg": -22.56}
@@ -76,7 +76,7 @@ def test_main_passes_when_png_and_npy_pair_up(tmp_path, monkeypatch):
 
 
 def test_main_fails_on_npy_without_raw_png(tmp_path, monkeypatch, capsys):
-    """raw PNG の無い npy を母数から漏らさない（PNG だけを列挙すると残りの 1/1 で PASS していた）。"""
+    """raw PNG の無い npy を母数から漏らさない（PNG だけを列挙すると残りの 1/1 で PASS してしまう）。"""
     _make_session(tmp_path, monkeypatch, png_idx=[1], npy_idx=[0, 1])
 
     assert main(["--session", "s"]) == 1
@@ -85,10 +85,10 @@ def test_main_fails_on_npy_without_raw_png(tmp_path, monkeypatch, capsys):
     assert "1/2 フレーム一致" in out
 
 
-# ===== main: 録画時の条件との食い違いの警告（2026-11-02 追加・判定は変えない） =====
+# ===== main: 録画時の条件との食い違いの警告（判定は変えない） =====
 
 def test_main_warns_when_recorded_config_differs(tmp_path, monkeypatch, capsys):
-    """meta.json の config が現行と違えば [WARN] で知らせる（旧設定セッションの不一致を回帰と誤読しない）。"""
+    """meta.json の config が現行と違えば [WARN] で知らせる（別設定で録画したセッションの不一致を回帰と誤読しない）。"""
     _make_session(tmp_path, monkeypatch, png_idx=[0], npy_idx=[0])
     meta_path = tmp_path / "outputs" / "s" / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))

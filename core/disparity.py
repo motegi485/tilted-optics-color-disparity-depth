@@ -2,14 +2,13 @@
 
 数値計算は rust/disparity/（PyO3拡張 `_rt_disparity_native`）に委譲する。
 入力の 2D 形状・dtype(uint8)・非空・kernel_size/search_range_x の正の整数・奇数性は
-ここで検証し、既存呼び出し元との ValueError 契約（project_knowledge/implementation/known-issues.md #10）を維持する
+ここで検証し、不正入力は assert でなく ValueError で拒否する契約を維持する
 （PyO3側の型抽出失敗は ValueError ではなく TypeError/OverflowError になるため、
 検証はネイティブ拡張呼び出しの前に済ませる。red/blue の形状不一致のみネイティブ側の
 防御チェックが ValueError を出す）。入力のメモリ配置は問わず、ネイティブへは C 連続にそろえて渡す。
 
 Python参照実装は core/_disparity_reference.py に凍結保存されている
-（project_knowledge/implementation/verification-and-tools.md に記載の Rust↔Python 照合・checks/bench_disparity.py の速度比較・checks/verify_disparity_rust.py
-の回帰ゲートで使用。変更しない）。
+（Rust↔Python の数値照合 checks/verify_disparity_rust.py と、checks/bench_disparity.py の速度比較で使用。変更しない）。
 """
 import numpy as np
 
@@ -43,7 +42,7 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
 
     Returns:
         np.ndarray: 符号付き視差マップ（float32, shape=(H,W)）。
-                    d=0 は POF 上、d>0/d<0 は前後ぼけ、np.nan は無効画素。
+                    d=0 は合焦面（POF: Plane Of Focus）上、d>0/d<0 は前後ぼけ、np.nan は無効画素。
     """
     if len(red_img.shape) != 2 or len(blue_img.shape) != 2:
         raise ValueError("入力は1チャンネルの画像を入力してください")
@@ -67,8 +66,7 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
         raise ValueError(f"search_range_x は奇数である必要があります（渡された値: {search_range_x}）")
 
     # Rust 側は連続配列の生バッファを行優先 (y*w+x) で読む。F 連続（np.asfortranarray・転置 view 等）を
-    # そのまま渡すと列優先のバッファを行優先と誤読し、画素配置の違う視差を無警告で返す（2026-10-30 修正・
-    # project_knowledge/implementation/known-issues.md #27）。C 連続の入力（cv2.split の出力など）は同じオブジェクトが返るのでコピーは起きない。
+    # そのまま渡すと列優先のバッファを行優先と誤読し、画素配置の違う視差を無警告で返す。C 連続の入力（cv2.split の出力など）は同じオブジェクトが返るのでコピーは起きない。
     red_img = np.ascontiguousarray(red_img)
     blue_img = np.ascontiguousarray(blue_img)
 

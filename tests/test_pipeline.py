@@ -15,7 +15,7 @@ def _params() -> DepthParams:
                        v_neg=400000.0, u_neg=50.0, a_neg=-30.0, w_neg=0.0)
 
 
-# ===== process_frame: 形状・dtype の入力検証（2026-09 レビュー） =====
+# ===== process_frame: 形状・dtype の入力検証 =====
 
 def test_process_frame_wrong_height_raises():
     bad = np.zeros((_H + 8, _W, 3), dtype=np.uint8)
@@ -56,10 +56,10 @@ def test_process_frame_valid_input_returns_expected_shape_and_dtype():
     assert depth.dtype == np.float32
 
 
-# ===== process_frame: 視差ゲート（gate1＋推論帯・2026-09-18）=====
+# ===== process_frame: 視差ゲート（視差上限ゲート＋推論帯）=====
 
 def test_process_frame_applies_gate1_and_inference_band(monkeypatch):
-    """ZNCC を既知の視差を返す fake に差し替え、gate1（|d| > DISP_MAX）と推論帯
+    """ZNCC を既知の視差を返す fake に差し替え、視差上限ゲート（|d| > DISP_MAX）と推論帯
     （|d| <= INFER_BAND_LOW または |d| >= INFER_BAND_HIGH）の外側だけが NaN になることを確認する。
     境界値は両方とも「落ちる」側（校正帯と同じ厳密不等号）。"""
     import realtime.pipeline as mod
@@ -75,12 +75,12 @@ def test_process_frame_applies_gate1_and_inference_band(monkeypatch):
         70: (high - 0.05, True),
         80: (high, False),                   # 境界 |d| == HIGH → 落ちる
         90: (-high, False),
-        100: (high + 1.0, False),            # 帯の上側（gate1 は通るが推論帯で落ちる）
-        110: (dmax, False),                  # gate1 の境界は通るが推論帯で落ちる（HIGH < DISP_MAX）
-        120: (dmax + 1.0, False),            # gate1 で落ちる
+        100: (high + 1.0, False),            # 帯の上側（視差上限ゲートは通るが推論帯で落ちる）
+        110: (dmax, False),                  # 視差上限ゲートの境界は通るが推論帯で落ちる（HIGH < DISP_MAX）
+        120: (dmax + 1.0, False),            # 視差上限ゲートで落ちる
         130: (-(dmax + 1.0), False),
     }
-    assert high < dmax                       # 「gate1 は推論帯に吸収される」の前提（記録票 §7）
+    assert high < dmax                       # 「視差上限ゲートは推論帯に吸収される」の前提
 
     def fake_zncc(red, blue, kernel_size, search_range_x, th_value):
         assert (kernel_size, search_range_x, th_value) == (config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)

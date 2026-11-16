@@ -67,7 +67,7 @@ def test_predicted_max_disparity_signs_and_monotonic():
 def test_bench_rows(monkeypatch):
     monkeypatch.setattr(common, "calcDisparityByZNCC", lambda red, blue, k, s, t: np.full((H, W), np.nan, np.float32))
     proc = np.random.default_rng(0).integers(0, 256, size=(H, W, 3), dtype=np.uint8)
-    # S を明示（config 既定は 2026-09-18 に 31 → 41 になったため既定に依存させない）
+    # S を明示（config 既定値の変更に影響されないようにする）
     rows = bench_search_ranges(proc, [common.DispSettings(search_range_x=31), common.DispSettings(search_range_x=41)], n=3)
     assert [r["search_range_x"] for r in rows] == [31, 41] and set(rows[0]) | {"frame"} == set(BENCH_COLUMNS)
     assert all(r["n"] == 3 and r["min_ms"] <= r["mean_ms"] <= r["p95_ms"] + 1e-9 for r in rows)
@@ -83,7 +83,7 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
         d[:, 110:115] = min(21.0, reach)            # 基準 S（config 既定 41）では到達上限 19.5 に張り付き、S=51 では 21.0
         return d                                    # （20.0 だと基準 19.5 との差が「変化」の閾値 0.5 px ちょうどになるため 21.0）
 
-    base_reach = common.DispSettings().reach_max     # 基準 S の到達上限（S=41 なら 19.5・旧 S=31 なら 14.5）
+    base_reach = common.DispSettings().reach_max     # 基準 S の到達上限（S=41 なら 19.5）
 
     monkeypatch.setattr(common, "calcDisparityByZNCC", fake_zncc)
     cap = tmp_path / "captures" / "dist_2000"

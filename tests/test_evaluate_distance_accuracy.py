@@ -39,7 +39,7 @@ def test_parse_gt_from_session_name():
 
 def test_parse_gt_rejects_out_of_range():
     """runner 既定のセッション名（日時）を渡すと末尾の時刻 101530 が距離に化けるので、
-    gate2 レンジ外（DEPTH_MAX 以上）として拒否する。"""
+    距離範囲（DEPTH_MAX 未満）の外として拒否する。"""
     with pytest.raises(ValueError):
         parse_gt_from_session_name("20260915_101530")
     with pytest.raises(ValueError):
@@ -71,7 +71,7 @@ def test_summarize_errors_values():
 def test_summarize_session_pooled_and_per_frame(tmp_path):
     h, w = 4, 6
     # フレーム0: 有効3画素 (2000, 2010, 1990)、フレーム1: 有効1画素 (2100)、
-    # フレーム2: gate2 外 (0 と 60000) と NaN のみ → 有効0
+    # フレーム2: 距離範囲外 (0 と 60000) と NaN のみ → 有効0
     f0 = _frame(h, w, {(0, 0): 2000.0, (1, 1): 2010.0, (2, 2): 1990.0})
     f1 = _frame(h, w, {(3, 5): 2100.0})
     f2 = _frame(h, w, {(0, 1): 0.0, (1, 2): 60000.0})

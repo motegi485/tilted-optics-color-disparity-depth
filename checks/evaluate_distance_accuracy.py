@@ -5,8 +5,8 @@ realtime.runner が保存した outputs/{session}/{i:06d}.npy（深度マップ�
 誤差統計を出す。深度の再計算はしない（保存済み npy をそのまま集計する。再現一致の確認は
 checks.verify_clip_replay の役割）。
 
-集計の定義（checks.evaluate の回帰アンカーと同じ流儀・project_knowledge/implementation/verification-and-tools.md）:
-  - 有効画素: gate2 と同じ config.DEPTH_MIN < z < config.DEPTH_MAX を満たす画素
+集計の定義（checks.evaluate の回帰アンカーと同じ流儀）:
+  - 有効画素: 距離範囲ゲート（checks.evaluate と同じ）config.DEPTH_MIN < z < config.DEPTH_MAX を満たす画素
     （NaN は比較で False となり自然に除外される）
   - 誤差 e = z_est − z_gt [mm]（画素ごと・float64 で集計）
   - 全フレーム統合（pooled）: 有効画素数・有効率・平均推定距離・平均誤差（符号付き＝bias）・
@@ -46,7 +46,7 @@ import numpy as np
 import config
 
 
-# 出力 CSV の列順（print の表もこの順）。project_knowledge/implementation/verification-and-tools.md に列の定義を記載。
+# 出力 CSV の列順（print の表もこの順）。各列の意味は上の docstring の集計定義を参照。
 COLUMNS = [
     "session", "gt_mm", "frames_used", "frames_total", "roi",
     "n_valid_total", "n_roi_px_per_frame", "valid_rate",
@@ -65,7 +65,7 @@ _LOG_LINE = re.compile(
 
 
 def _check_gt(gt: int, where: str) -> int:
-    """正解距離 [mm] が gate2 のレンジ内（DEPTH_MIN < gt < DEPTH_MAX）であることを検証する。
+    """正解距離 [mm] が距離範囲ゲートの範囲内（DEPTH_MIN < gt < DEPTH_MAX）であることを検証する。
 
     runner 既定のセッション名（YYYYmmdd_HHMMSS）を誤って渡すと末尾の時刻が距離として
     解釈されてしまうため、レンジ外は拒否する。
@@ -184,7 +184,7 @@ def summarize_session(out_dir: Path, gt_mm: int, *, roi: tuple[int, int, int, in
         elif depth.shape != shape_ref:
             raise ValueError(f"{p}: フレーム間で形状が不一致 ({depth.shape} != {shape_ref})")
         sub = depth[y0:y1, x0:x1].astype(np.float64)
-        valid = sub[(sub > depth_min) & (sub < depth_max)]   # gate2 と同じ。NaN は自動的に落ちる
+        valid = sub[(sub > depth_min) & (sub < depth_max)]   # 距離範囲ゲート。NaN は自動的に落ちる
         per_frame_valid.append(int(valid.size))
         if valid.size:
             per_frame_mean.append(float(np.mean(valid)))
@@ -346,14 +346,14 @@ def main(argv: list[str] | None = None) -> int:
                 r.update(stats)
         if r["n_valid_total"] == 0:
             any_empty = True
-            print(f"[WARN] {session}: 有効画素が0件（gate2 {config.DEPTH_MIN}<z<{config.DEPTH_MAX} と ROI {r['roi']}）")
+            print(f"[WARN] {session}: 有効画素が0件（距離範囲ゲート {config.DEPTH_MIN}<z<{config.DEPTH_MAX} と ROI {r['roi']}）")
         rows.append(r)
 
     # 表示（正解距離順ではなく指定順のまま。列は主要なものに絞る）
     show = ["session", "gt_mm", "frames_used", "n_valid_total", "valid_rate",
             "mean_est_mm", "mean_err_mm", "mae_mm", "std_err_mm", "rmse_mm",
             "frame_mean_est_std_mm", "e2e_fps", "drop_ratio"]
-    print(f"gate2: {config.DEPTH_MIN} < z < {config.DEPTH_MAX} [mm]  roi={rows[0]['roi']}  "
+    print(f"距離範囲ゲート: {config.DEPTH_MIN} < z < {config.DEPTH_MAX} [mm]  roi={rows[0]['roi']}  "
           f"skip_first={args.skip_first}  max_frames={args.max_frames}")
     print("  ".join(show))
     for r in rows:

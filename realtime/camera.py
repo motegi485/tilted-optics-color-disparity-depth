@@ -1,13 +1,13 @@
-"""realtime/camera.py — フレーム供給の抽象化と共有 preprocess（project_knowledge/modules/module-realtime.md）。
+"""realtime/camera.py — フレーム供給の抽象化と共有 preprocess。
 
 各 FrameSource は raw（WEBCAM_NATIVE_SIZE=1280x720 BGR）を返し、共有 preprocess() を
 全 source 共通に適用する。これにより live と clip 再生が preprocess 以降ビット一致し、
-project_knowledge/requirements/requirements.md に記載の「ライブ／クリップ再生での再現一致」を担保する。録画は raw を captures/ に保存する
-（processed を録らない。同じ raw を同じ preprocess に通せば再現するため・project_knowledge/modules/module-realtime.md）。
+ライブ実行と録画クリップ再生で同じ結果が再現できる。録画は raw を captures/ に保存する
+（processed を録らない。同じ raw を同じ preprocess に通せば再現するため）。
 
-realtime/ は core ではない: config import・I/O・cv2・logging を持ってよい（project_knowledge/architecture/architecture.md）。
+realtime/ は core ではない: config import・I/O・cv2・logging を持ってよい。
 計算の中核（視差・深度）は持たず、pipeline.py が core 純関数を呼ぶ。
-入力検証は raise（assert は -O で無効化されるため使わない・project_knowledge/implementation/known-issues.md #10）。
+入力検証は raise（assert は -O で無効化されるため使わない）。
 """
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 def preprocess(raw: np.ndarray) -> np.ndarray:
     """raw(1280x720 BGR) -> (352,528,3) BGR。横中央クロップで 3:2 化 → INTER_AREA 縮小。
 
-    全 source 共通の唯一の前処理。横クロップは POF 距離マッピング軸（縦 y・project_knowledge/architecture/theory.md）に
-    不干渉で縦の距離分解能を保つ。縮小は INTER_AREA でエイリアス抑制（4:2:0 で既に
-    鈍る R/B をこれ以上荒らさない・project_knowledge/modules/module-realtime.md）。
+    全 source 共通の唯一の前処理。横クロップは、合焦面（POF: Plane Of Focus）と距離を対応づける軸
+    （画像の縦方向 y）に影響せず、縦の距離分解能を保つ。縮小は INTER_AREA でエイリアスを抑える
+    （クロマサブサンプリング 4:2:0 で既に解像度の落ちている R/B をこれ以上荒らさないため）。
     """
     # numpy の shape は (H, W, C)。config は (W, H) 順なので (w, h) に並べ替えて比較する。
     h, w = raw.shape[:2]
@@ -91,7 +91,7 @@ class FrameSource(ABC):
 
 # ===== ライブ webcam: cv2.VideoCapture を CAP_MSMF で開き、実フィードの raw を返す =====
 class WebcamSource(FrameSource):
-    """EOS Webcam Utility Pro 経由のライブ webcam（CAP_MSMF・index=0・project_knowledge/modules/module-realtime.md）。"""
+    """EOS Webcam Utility Pro 経由のライブ webcam（CAP_MSMF・index=0）。"""
 
     def __init__(self, index: int | None = None, backend: int | None = None,
                  fps_probe_frames: int = 30):
@@ -108,7 +108,7 @@ class WebcamSource(FrameSource):
         if not cap.isOpened():
             cap.release()                           # 掴みかけた local ハンドルを解放してから raise
             raise RuntimeError(f"WebcamSource: VideoCapture(index={self.index}, backend={self.backend}) を開けません")
-        # 解像度を要求（実測では無償枠でどう要求しても 1280x720 に張り付く・project_knowledge/requirements/requirements.md）。
+        # 解像度を要求（実測では、どの解像度を要求しても 1280x720 になる）。
         w, h = config.WEBCAM_NATIVE_SIZE
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
@@ -135,7 +135,7 @@ class WebcamSource(FrameSource):
         静止プレースホルダ（no-feed 画面）は連続フレームが完全一致（時間 std≈0）。実フィードは
         毎フレーム必ずノイズで変動（時間 std>0）。これを burst 内の時間 std で判定する。
         confirm 回連続で閾値超えを確認してから返す（cold→live 遷移時の一過性フレームに latch しない）。
-        timeout 内に実フィードを検出できなければ raise（黙ってプレースホルダを掴まない・project_knowledge/architecture/architecture.md の fail-fast原則）。
+        timeout 内に実フィードを検出できなければ raise（黙ってプレースホルダを掴まない fail-fast）。
         """
         if self.cap is None:
             raise RuntimeError("WebcamSource: _wait_until_live が open() 前に呼ばれました")
@@ -166,7 +166,7 @@ class WebcamSource(FrameSource):
             "カメラを動画モードで起こし、ライブ供給されているか確認してください")
 
     def _probe_fps(self) -> float:
-        """open() 内で一度だけ実効 fps を実測（連続 fps は runner 側で計測・project_knowledge/modules/module-realtime.md）。
+        """open() 内で一度だけ実効 fps を実測（連続 fps は runner 側で計測）。
 
         カメラ自己申告の CAP_PROP_FPS は仮想 UVC では当てにならないため、実際に読めた
         枚数/経過時間で測る。
@@ -196,10 +196,10 @@ class WebcamSource(FrameSource):
 
 # ===== 録画クリップ: 保存した raw クリップ（1280x720）を順送りで返す =====
 class VideoFileSource(FrameSource):
-    """録画した raw クリップ（1280x720）を順送り（カメラ非接続デバッグ・再現実行・project_knowledge/modules/module-realtime.md）。
+    """録画した raw クリップ（1280x720）を順送り（カメラ非接続デバッグ・再現実行）。
 
-    ※ project_knowledge/requirements/requirements.md に記載のビット一致再現に使うには、録画が「無劣化（lossless / 連番PNG等）」である
-       必要がある（圧縮クリップは閲覧デバッグ用。録画形式は project_knowledge/modules/module-realtime.md で確定）。
+    ※ ライブ実行とのビット一致再現に使うには、録画が「無劣化（lossless / 連番PNG等）」である
+       必要がある（圧縮クリップは閲覧・デバッグ用）。
     """
 
     def __init__(self, path: str | Path, loop: bool = False):
@@ -274,7 +274,7 @@ class StillImageSource(FrameSource):
 
     想定入力は「保存した capture の1フレーム（raw 1280x720）」。共有 preprocess を通す
     前提のため raw サイズを検証する。任意サイズの一般テスト画像は対象外（それは
-    evaluate.py + params/baseline/ の役割・project_knowledge/architecture/architecture.md）。
+    checks/evaluate.py + params/baseline/ の役割）。
     """
 
     def __init__(self, path: str | Path):

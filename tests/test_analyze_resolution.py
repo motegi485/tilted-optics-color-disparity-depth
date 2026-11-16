@@ -23,8 +23,8 @@ from tools.analyze_resolution import (
 W0 = config.IMAGE_SIZE[0]
 TRUE = DepthParams(v_pos=426000.0, u_pos=-61.0, a_pos=-26.4, w_pos=0.0,
                    v_neg=411000.0, u_neg=-17.4, a_neg=-22.8, w_neg=0.0)
-CALIB_ALL = list(range(1000, 4001, 200))     # B3 の 16 距離
-CORE = list(range(1400, 3201, 200))          # 2026-09-15 と同じ 10 距離
+CALIB_ALL = list(range(1000, 4001, 200))     # 校正用の 16 距離
+CORE = list(range(1400, 3201, 200))          # 評価用の中核 10 距離
 
 
 def _synthetic_disparity(depth: float, size: tuple[int, int], *, noise_px: float = 0.03, cols_per_row: int = 40,

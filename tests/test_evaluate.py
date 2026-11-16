@@ -44,7 +44,7 @@ def test_main_returns_2_when_only_unregistered_anchor_present(tmp_path, monkeypa
 
 
 def test_main_finds_uppercase_jpg_extension(tmp_path, monkeypatch, capsys):
-    """拡張子が大文字（実アンカーは 2300.JPG）でも、大小を区別するファイルシステムで検出できる（2026-11-02 修正）。"""
+    """拡張子が大文字（実アンカーは 2300.JPG）でも、大小を区別するファイルシステムで検出できる。"""
     monkeypatch.setattr(config, "TEST_DIR", tmp_path)
     _write_unregistered_jpg(tmp_path / "9999.JPG")
     assert main() == 2                       # 照合 0 件の 2（画像なしの 2 ではない）

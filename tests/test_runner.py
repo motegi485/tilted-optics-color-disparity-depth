@@ -151,7 +151,7 @@ def test_draw_colorbar_preserves_shape_and_dtype_and_draws_in_place():
 
 
 def test_draw_colorbar_near_red_at_bottom_far_blue_at_top():
-    """近距離(赤)をバー下端、遠距離(青)をバー上端に置く仕様（実装時の確認事項でユーザー指定）。"""
+    """近距離(赤)をバー下端、遠距離(青)をバー上端に置く仕様。"""
     img = np.zeros((352, 528, 3), dtype=np.uint8)
     h, w = img.shape[:2]
     x_in_bar = w - 12                                   # バー内側の列（margin_right=6, bar_w=16 前提）
@@ -194,7 +194,7 @@ def test_ensure_session_dirs_existing_nonempty_raises_and_preserves_content(tmp_
 
 @pytest.mark.parametrize("bad_session", ["..", "a/b", "a\\b", ""])
 def test_ensure_session_dirs_rejects_unsafe_name(bad_session, tmp_path, monkeypatch):
-    """`..`・区切り文字混入・空文字は単一ディレクトリ名でないため raise（2026-09 レビュー）。"""
+    """`..`・区切り文字混入・空文字は単一ディレクトリ名でないため raise。"""
     monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
     monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
 
@@ -233,7 +233,7 @@ def test_ensure_session_dirs_existing_empty_dir_is_allowed(tmp_path, monkeypatch
     assert outputs.is_dir()
 
 
-# ===== セッション動画（project_knowledge/modules/module-realtime.md）: _LatestFrameSlot =====
+# ===== セッション動画: _LatestFrameSlot =====
 
 def test_latest_frame_slot_starts_empty_and_returns_updated_reference():
     slot = _LatestFrameSlot()
@@ -480,7 +480,7 @@ def test_write_session_meta_records_display_range(tmp_path, monkeypatch):
     assert "DEPTH_MAX" not in meta["config"]     # 計算設定（再現一致の条件）とは分けて持つ
 
 
-# ===== run: 録画の保存失敗（2026-10-30 監査 IMPL-001） =====
+# ===== run: 録画の保存失敗（書込み失敗を握りつぶさず異常として扱う） =====
 
 class _OneFrameSource(FrameSource):
     """raw を 1 枚だけ返して EOF になる最小 source（実カメラ・実ファイル無し）。"""

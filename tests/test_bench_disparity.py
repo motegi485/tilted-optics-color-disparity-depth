@@ -22,9 +22,8 @@ def _fixed_bench(p95_ms: float):
 def test_main_exit_code_follows_budget_verdict(monkeypatch):
     """exit code は 30fps バジェット判定（p95 < 33.33 ms → 0・それ以外 → 1）に従う（計測を固定値に差し替えた HW 非依存の契約テスト）。
 
-    2026-09-18 の設定変更（K25/S41/T20）後、synthetic 入力（E≈40k・ノイズ板全画面に近い最悪ケース）は実測で
-    予算超（p95 ≈ 58 ms・記録票 2026-09-18 §8）になった。30fps の基準は典型シーン（scene_01・§7）なので、
-    実測値そのものはここでは検証せず（旧テストは synthetic で PASS(0) を前提にしていた）、判定と終了コードの接続だけを見る。
+    synthetic 入力はエッジ画素が多い最悪ケース寄りで、実測では予算を超えることがある。30fps の基準は
+    典型シーン（captures）なので、実測値そのものはここでは検証せず、判定と終了コードの接続だけを見る。
     """
     monkeypatch.setattr(mod, "_bench", _fixed_bench(10.0))
     assert main(["--source", "synthetic", "--n", "1", "--impl", "native"]) == 0

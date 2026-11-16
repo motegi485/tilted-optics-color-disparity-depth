@@ -4,7 +4,7 @@ import pytest
 
 from tools.w_offset_sim import main, simulate
 
-# 2026-07-03 live 校正の pos 係数に近い値（project_knowledge/modules/module-calibration.md「既知のパラメータセット」live 節）。
+# 実機の live 校正で得た pos 係数に近い値。
 # 係数の全桁一致は目的ではなく、「校正範囲で δ≈0.1 m の影響が px・mm でどの程度か」の桁を固定する。
 V_LIVE = 4.228e5
 U_LIVE = -63.81
@@ -30,7 +30,7 @@ def test_endpoints_match_live_curve():
 
 def test_delta_of_lens_sensor_offset_stays_small_in_calibrated_range():
     """δ=122 mm（関連論文のセンサ–レンズ距離の目安）で、残差は 2 px 未満・深度誤差は 30 mm 未満に
-    収まる（2026-09-14 の実行値: 最大 1.47 px / 25.6 mm）。桁が変わったら theory.md の記述を見直す。"""
+    収まる（assert の範囲がその桁。桁が変わったらモデルの前提を見直す）。"""
     res = simulate(Z_LIVE, V_LIVE, U_LIVE, 122.0)
     assert 1.0 < res["resid_max_px"] < 2.0
     assert 20.0 < res["err_max_mm"] < 30.0

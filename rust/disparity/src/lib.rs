@@ -1,8 +1,11 @@
-//! calcDisparityByZNCC の Rust 実装（Phase D・core/disparity.py から呼ばれる内部拡張）。
+//! calcDisparityByZNCC の Rust 実装（core/disparity.py から呼ばれる内部拡張）。
 //!
 //! core/_disparity_reference.py（凍結された Python 参照実装）と 1:1 で一致するように
 //! 移植している。境界条件・タイ処理・浮動小数の評価順まで意図的に複製した箇所は、
 //! 各関数のコメントに理由を記す（`checks/verify_disparity_rust.py` で照合する）。
+//!
+//! 元の Python 実装は TiltedOpticsDepthIntro（MIT, Copyright (c) 2025 aoi1115）のコードを元にしている。
+//! 著作権表示と許諾文はリポジトリ直下の NOTICE を参照。
 
 use numpy::ndarray::Array2;
 use numpy::{PyArray2, PyReadonlyArray2, PyUntypedArrayMethods, ToPyArray};
@@ -106,7 +109,7 @@ fn compute_disparity_row(
     // 行ごとに1回だけ確保し、画素ごとに上書き再利用する（全 search_range_x 要素を
     // 毎回書き切るため、前画素の値が残っていても正しさに影響しない）。
     // エッジ画素数分（実写1フレームで数千〜1万超）ヒープ確保していたのを行数分に削減し、
-    // 30fps バジェットでの p95 ジッタを抑える最適化（Phase 3・実測ベンチ駆動）。
+    // 30fps バジェットでの p95 ジッタを抑える最適化（実測ベンチで効果を確認した最適化）。
     let mut sim_array = vec![0f32; search_range_x];
 
     for x in (x_start as usize)..(x_end as usize) {
@@ -224,7 +227,7 @@ fn calc_disparity_impl(
 
     // 空画像（h==0/w==0）: 下の (par_)chunks_mut(w) は chunk_size=0 で panic するため先に返す。
     // ラッパー（core/disparity.py）は空入力を ValueError で拒否するので、これは本拡張を
-    // 直接呼ぶコードのための防御（w=0×kernel_size=1 で panic していた回帰・2026-07-13）
+    // 直接呼ぶコードのための防御（画像幅 0 かつ kernel_size=1 で panic していたため）
     if h == 0 || w == 0 {
         return out;
     }

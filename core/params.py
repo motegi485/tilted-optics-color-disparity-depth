@@ -2,7 +2,7 @@
 
 DepthParams が係数の single source of truth。CSV からの読み込みは load_params。
 core/ は本来 I/O を持たない純関数の場所だが、params.py は「params の読み書き」担当として
-project_knowledge/modules/module-core.md で I/O を許可された例外として説明されている（pandas/pathlib に依存してよい唯一の core ファイル）。
+CSV の I/O を許可された例外（pandas/pathlib に依存してよい唯一の core ファイル）。
 """
 from dataclasses import dataclass
 import math
@@ -16,7 +16,7 @@ class DepthParams:
 
     pos = 視差 d > 0 側、neg = d < 0 側。前ぼけ/後ろぼけのラベルではなく符号で持つ
     （前後対応は校正の符号規約・リグ構成に依存するため、係数コンテナは符号のみを扱う）。
-    w は理論的根拠で 0 固定だが、論文式との対応と将来の再検討のため欄として残す
+    w は実験的に 0 としているが、論文式との対応と将来の再検討のため欄として残す
     （0 固定の強制は fit_params.py 側の責務）。
     """
     v_pos: float
@@ -36,11 +36,11 @@ class DepthParams:
         値は float() で native float に正規化する（pandas 由来の numpy.float64 を core に持ち込まないため）。
 
         値の妥当性は ValueError で拒否する（入力検証は raise・assert は -O で無効化されるため
-        使わない・project_knowledge/implementation/known-issues.md #10）。ここがシステム境界の唯一の検証点であり、通過後は
+        使わない）。ここがシステム境界の唯一の検証点であり、通過後は
         compute_depth が無検査で使う:
           - 8係数すべてが有限。NaN/inf の係数は同符号枝の全有効画素を無音で NaN/inf にするため、
             推論に入る前に止める。
-          - w_pos == w_neg == 0。w=0 固定は project_knowledge/architecture/theory.md に記載の理論的根拠に基づく設計判断であり、
+          - w_pos == w_neg == 0。w=0 固定は、2 パラメータの参照式 z = v/(y−ā·d−u) を実験的に採用した設計判断であり、
             CSV の手編集や旧実験ファイルで 0 以外が紛れ込むと全画素に一律オフセットが乗る。
         """
         required = (
@@ -71,7 +71,7 @@ class DepthParams:
         if nonzero_w:
             detail = ", ".join(f"{k}={values[k]!r}" for k in nonzero_w)
             raise ValueError(
-                f"w は 0 固定です（project_knowledge/architecture/theory.md 参照）。0 以外の値が指定されています: {detail}"
+                f"w は 0 固定です（参照式 z = v/(y−ā·d−u) の w は実験的に 0 としています）。0 以外の値が指定されています: {detail}"
             )
 
         return cls(**values)

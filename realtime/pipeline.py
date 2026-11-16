@@ -1,12 +1,12 @@
-"""realtime/pipeline.py — 毎フレーム処理（project_knowledge/architecture/architecture.md のオンラインデータフロー・project_knowledge/modules/module-realtime.md）。
+"""realtime/pipeline.py — 毎フレーム処理（前処理済み画像 -> depth マップ）。
 
-evaluate.py の per-frame core パスと同一手順で depth マップを返す（R/B 分割 →
-ZNCC → gate1(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=INFER_BAND_HIGH を NaN・2026-09-18 新設)
-→ depth）ことが、ふるまい一致（project_knowledge/requirements/requirements.md）の前提。
+checks/evaluate.py の per-frame core パスと同一手順で depth マップを返す（R/B 分割 →
+ZNCC → 視差上限ゲート(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=INFER_BAND_HIGH を NaN)
+→ depth）ことが、ライブ実行とオフライン評価でふるまいを一致させる前提。
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
-core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<DEPTH_MAX) は適用しない――
+core 純関数を呼ぶだけに留める。距離範囲ゲート(Z レンジ 0<z<DEPTH_MAX) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の
-ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・project_knowledge/implementation/known-issues.md #10）。
+ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化されるため使わない）。
 """
 import cv2
 import numpy as np
@@ -19,7 +19,7 @@ from core.depth import compute_depth
 def process_frame(proc_bgr, params):
     """proc_bgr: preprocess 済み (352,528,3) uint8 BGR -> depth_map(float32, NaN 伝播)。
 
-    形状と dtype をここで強制する（2026-09 レビュー）。参照式の y は行番号そのものであり、
+    形状と dtype をここで強制する。参照式の y は行番号そのものであり、
     校正係数 v/u/ā は処理解像度 config.IMAGE_SIZE=(528,352) の y スケールに紐づく。別解像度の
     配列を渡すと同じ物理位置の y が変わるのに同じ係数が適用され、無音で誤った距離を返す。
     """
@@ -40,11 +40,11 @@ def process_frame(proc_bgr, params):
     # 2) ZNCC で視差マップを算出
     disp = calcDisparityByZNCC(red, blue, config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
 
-    # 3) gate1: 視差絶対値が探索半幅を超える画素を無効化（NaN）。S=41 では到達上限 19.5 < 20 で不発（安全網として維持）
+    # 3) 視差上限ゲート: 視差絶対値が探索半幅を超える画素を無効化（NaN）。S=41 では到達上限 19.5 < 20 で不発（安全網として維持）
     disp[np.abs(disp) > config.DISP_MAX] = np.nan
 
     # 3') 推論帯: 合焦面近傍の不感帯 |d| <= INFER_BAND_LOW と、大ぼけ域 |d| >= INFER_BAND_HIGH を無効化（NaN）。
-    #     NaN との比較は False なので gate1 で落ちた画素はそのまま。定義は tools/analysis_common.apply_gates と同一
+    #     NaN との比較は False なので 視差上限ゲートで落ちた画素はそのまま。定義は tools/analysis_common.apply_gates と同一
     abs_disp = np.abs(disp)
     disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
 
@@ -55,5 +55,5 @@ def process_frame(proc_bgr, params):
         params.v_neg, params.u_neg, params.a_neg, params.w_neg,
         config.EPS_DEN)
 
-    # gate2（Z レンジ 0<z<DEPTH_MAX）はここでは適用しない（runner 表示側の責務）
+    # 距離範囲ゲート（Z レンジ 0<z<DEPTH_MAX）はここでは適用しない（runner 表示側の責務）
     return depth

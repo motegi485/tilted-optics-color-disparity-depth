@@ -80,7 +80,7 @@ def test_calibrate_rejects_bad_aspect_ratio(tmp_path, monkeypatch):
         calibrate.main()
 
 
-# ===== ransac_fit_line: 一意値ガード（2026-09 レビュー）と正常フィット =====
+# ===== ransac_fit_line: 一意値ガードと正常フィット =====
 
 def test_ransac_fit_line_single_unique_value_raises():
     """d が全て同値だと設計行列 [d,1] の階数が1になり傾きを同定できないため raise。"""
@@ -92,7 +92,7 @@ def test_ransac_fit_line_single_unique_value_raises():
 
 def test_ransac_fit_line_degenerate_final_inliers_raises():
     """入力全体の一意値は3（入口のガードは通る）でも、最終インライヤが視差 3.0 の 60 点だけになると
-    傾きを同定できない。以前は a=0・b=行の平均を無警告で返していた（2026-10-30 監査 IMPL-002）。"""
+    傾きを同定できない。a=0・b=行の平均のような値を無警告で返さず、ValueError にする。"""
     d_vals = np.array([3.0] * 60 + [4.0, 6.5])
     row_vals = np.array([120.0] * 60 + [40.0, 330.0])
     with pytest.raises(ValueError, match="最終インライヤ"):

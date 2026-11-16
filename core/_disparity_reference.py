@@ -1,12 +1,15 @@
-"""core/_disparity_reference.py — calcDisparityByZNCC の Python 参照実装（凍結・Phase D）。
+"""core/_disparity_reference.py — calcDisparityByZNCC の Python 参照実装（凍結）。
 
-高速化（Rust移植）段階（詳細は docs/module-core.md）で core/disparity.py を Rust(PyO3) 実装へ差し替えた際に、
+Rust 版との数値照合の正解として凍結している Python 実装。core/disparity.py を Rust(PyO3) 実装へ差し替えた際に、
 本ファイルへ元の Python 実装をそのまま複製保存したもの。以後の関数本体は変更しない
 （変更する場合は rust/disparity/src/lib.rs と同時に変更し、checks/verify_disparity_rust.py
-で全コーパスを再検証すること）。用途:
-  - Rust 実装との数値照合の「正解」（docs/verification-and-tools.md）
+で再検証すること）。用途:
+  - Rust 実装との数値照合の「正解」
   - checks/bench_disparity.py での Python 版 vs Rust 版の速度比較
   - tests/test_core.py の挙動テストを両実装でパラメトライズする際の Python 側
+
+視差計算の骨格は TiltedOpticsDepthIntro（MIT, Copyright (c) 2025 aoi1115）のコードを元にしている。
+著作権表示と許諾文はリポジトリ直下の NOTICE を参照。
 """
 import math
 import cv2
@@ -30,7 +33,7 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
 
     Returns:
         np.ndarray: 符号付き視差マップ（float32, shape=(H,W)）。
-                    d=0 は POF 上、d>0/d<0 は前後ぼけ、np.nan は無効画素。
+                    d=0 は合焦面（POF: Plane Of Focus）上、d>0/d<0 は前後ぼけ、np.nan は無効画素。
     """
     if len(red_img.shape) != 2 or len(blue_img.shape) != 2:
         raise ValueError("入力は1チャンネルの画像を入力してください")
@@ -101,13 +104,13 @@ def calcDisparityByZNCC(red_img, blue_img, kernel_size, search_range_x, th_value
             # タイ・プラトー（sim_peak が両隣と同値以下）は視差を確定できないため無効化する。
             # 全シフト同値（blue 平坦・飽和で cv2.matchTemplate(TM_CCOEFF_NORMED) が定数パッチに
             # 対し常に同一値を返す場合など）に d=±(s_range-1) の偽視差が量産されるのを防ぐ
-            # （2026-07 レビュー・合成テストで確認）。
+            # （合成テストで確認）。
             if not (sim_peak > sim_neg and sim_peak > sim_pos):
                 continue  # NaN のまま
 
             denominator = 4 * sim_peak - 2 * sim_neg - 2 * sim_pos
             # 放物線が上に凸（denominator > 0）かつ |sim_pos - sim_neg| <= denominator（補正量 |δ| <= 1 に相当）のときのみ適用。
-            # 上の厳密局所最大の下では |δ| < 0.5 が代数的に成り立つので、このガードは主に float32 の桁落ち対策（docs/module-core.md）
+            # 上の厳密局所最大の下では |δ| < 0.5 が代数的に成り立つので、このガードは主に float32 の桁落ち対策
             if denominator > 0 and abs(sim_pos - sim_neg) <= denominator:
                 subpixel = (sim_pos - sim_neg) / denominator
             else:

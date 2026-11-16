@@ -1,4 +1,7 @@
-"""tools/analyze_disparity_stability.py — 視差の時間的安定性の解析（設定値の最適化実験 Phase A1）。
+"""tools/analyze_disparity_stability.py — 視差の時間的安定性の解析（設定値の感度解析）。
+
+これは設定値の感度解析の実験例で、実行には自前の撮影データ（data/captures など）と、
+列 session,gt_mm の manifest CSV（セッション名と正解距離 [mm]）が要る。
 
 静止した板を録画した評価セッション（`data/captures/dist_<mm>/`）では、被写体が動かないので視差 d のフレーム間の
 ばらつきは測定ノイズそのものである。各画素について有効フレーム数・平均 μ・標準偏差 σ_d・符号反転率
@@ -138,7 +141,7 @@ def bin_by_edge(session: str, st: dict[str, np.ndarray], edge_mean: np.ndarray, 
 
 def reference_thresholds(rows_all: list[dict], *, flip_ref: float = 0.05, sigma_ratio: float = 2.0,
                          min_px: int = 200) -> dict:
-    """統合ビン表から参考値を抜く（判断はユーザー。ここは機械的な抽出のみ）。
+    """統合ビン表から参考値を抜く（採否の判断は利用者が行う。ここは機械的な抽出のみ）。
 
     - flip_below_ref_from_px: 反転率が flip_ref 未満になり、それ以降のビンでも超えない最小の bin_lo
     - sigma_floor: 画素数 >= min_px のビンでの σ_d 中央値の最小値と、その bin_lo
@@ -217,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="視差の時間的安定性（σ_d・符号反転率 vs |d|・エッジ強度）の集計（A1）")
+    parser = argparse.ArgumentParser(description="視差の時間的安定性（σ_d・符号反転率 vs |d|・エッジ強度）の集計")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--sessions", nargs="+", metavar="NAME")
     src.add_argument("--manifest", metavar="CSV")

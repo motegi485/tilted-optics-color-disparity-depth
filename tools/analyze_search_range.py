@@ -1,4 +1,7 @@
-"""tools/analyze_search_range.py — 探索範囲 SEARCH_RANGE_X の解析（設定値の最適化実験 Phase A3）。
+"""tools/analyze_search_range.py — 探索範囲 SEARCH_RANGE_X の解析（設定値の感度解析）。
+
+これは設定値の感度解析の実験例で、実行には自前の撮影データ（data/captures など）と、
+列 session,gt_mm の manifest CSV（セッション名と正解距離 [mm]）が要る。
 
 探索範囲 S（奇数・半幅 (S−1)/2・到達上限 (S−1)/2 − 0.5）を決めるための 4 つの材料を 1 回の実行で出す。
 
@@ -179,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="探索範囲 SEARCH_RANGE_X の解析（分布・S 比較・予測曲線・計算時間）（A3）")
+    parser = argparse.ArgumentParser(description="探索範囲 SEARCH_RANGE_X の解析（分布・S 比較・予測曲線・計算時間）")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--sessions", nargs="+", metavar="NAME")
     src.add_argument("--manifest", metavar="CSV")

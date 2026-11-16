@@ -1,12 +1,12 @@
 """verify_pipeline_equivalence.py
 realtime.pipeline.process_frame と evaluate.py の per-frame core パス（集計前の depth マップ）が
-固定入力でビット一致することを検証する（project_knowledge/requirements/requirements.md の「経路の同値性」Done基準）。
+固定入力でビット一致することを検証する（リアルタイム経路と静止画評価経路の同値性の確認）。
 
 Path A: realtime.pipeline.process_frame（実モジュール）
-Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → 推論帯 → compute_depth）
+Path B: evaluate.py の core 手順を独立に再現（split → disparity → 視差上限ゲート → 推論帯 → compute_depth）
 両者の depth マップが NaN 位置・有限値とも厳密一致することを確認する。
 
-gate2(0<z<DEPTH_MAX) は両経路とも適用しない（比較は gate2 の前の depth マップで行う）。深度精度ではなく
+距離範囲ゲート（DEPTH_MIN < z < DEPTH_MAX）は両経路とも適用しない（比較はこのゲートの前の depth マップで行う）。深度精度ではなく
 経路の同値性の確認なので、webcam 校正の有無に関係なく実施可。params は baseline 確定値を使う。
 
 実行: uv run python -m checks.verify_pipeline_equivalence
@@ -49,14 +49,14 @@ def load_fixture():
 
 
 def evaluate_core_depthmap(frame, params):
-    """Path B: evaluate.py の core 手順（split → disparity → gate1 → 推論帯 → compute_depth）を
-    pipeline.py を経由せず独立に再現し、集計前の depth マップを返す（gate2 は適用しない）。
+    """Path B: evaluate.py の core 手順（split → disparity → 視差上限ゲート → 推論帯 → compute_depth）を
+    pipeline.py を経由せず独立に再現し、集計前の depth マップを返す（距離範囲ゲートは適用しない）。
     """
     blue, _, red = cv2.split(frame)
     disp = calcDisparityByZNCC(red, blue,
                                config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
-    disp[np.abs(disp) > config.DISP_MAX] = np.nan                                       # gate1
-    abs_disp = np.abs(disp)                                                              # 推論帯（2026-09-18）
+    disp[np.abs(disp) > config.DISP_MAX] = np.nan                                       # 視差上限ゲート
+    abs_disp = np.abs(disp)                                                              # 推論帯
     disp[(abs_disp <= config.INFER_BAND_LOW) | (abs_disp >= config.INFER_BAND_HIGH)] = np.nan
     return compute_depth(
         disp,
@@ -91,11 +91,11 @@ def main():
 
     n_finite = int(np.sum(~nan_A))
     valid = depth_A[(depth_A > config.DEPTH_MIN) & (depth_A < config.DEPTH_MAX)]
-    print(f"dtype(A)={depth_A.dtype}  有効画素={n_finite}  gate2後有効={valid.size}")
+    print(f"dtype(A)={depth_A.dtype}  有効画素={n_finite}  距離範囲ゲート後の有効={valid.size}")
     print(f"NaN 位置一致: {nan_match}  /  有限値ビット一致: {finite_match}")
 
     # 両経路とも全 NaN だと空集合同士の比較で match 判定が真になり得るため、
-    # 有効画素 0 は無条件で FAIL とする（Rust 照合の土台としての穴を塞ぐ・2026-07 レビュー）。
+    # 有効画素 0 は無条件で FAIL とする（空の結果で Rust 照合の土台が成り立ったように見えるのを防ぐ）。
     if n_finite == 0:
         print("[FAIL] 有効画素 0 — 入力・params・ゲートを確認")
         return 1

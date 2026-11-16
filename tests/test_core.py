@@ -3,7 +3,7 @@
 calcDisparityByZNCC の挙動テストは core.disparity（Rust 実装への薄いラッパー）と core._disparity_reference（凍結 Python 参照実装）の両方でパラメトライズする。
 Rust↔Python の数値照合そのものは checks/verify_disparity_rust.py が広いコーパスで担うが、
 ここでの二重化は「どちらの実装も契約（ValueError・既知シフト・タイ→NaN）を満たす」ことを
-pytest の通常回帰網の中で恒久的に守るためのもの（2026-07 のコードレビュー指摘）。
+pytest の通常回帰網の中で恒久的に守るためのもの。
 """
 import numpy as np
 import pytest
@@ -46,10 +46,10 @@ def test_calc_disparity_non_2d_raises(calc_fn):
         calc_fn(img3d, img2d, K, S, TH)
 
 
-# ===== calcDisparityByZNCC: ラッパー(core.disparity)のみの入力契約（2026-07-13 レビュー） =====
+# ===== calcDisparityByZNCC: ラッパー(core.disparity)のみの入力契約 =====
 # 参照実装(core._disparity_reference)は凍結のため対象外。参照実装のこれらの入力への挙動は
 # 契約外（float64 は cv2.error、負の kernel_size は負インデックス回り込み等）であり、
-# ラッパーで ValueError に統一する（project_knowledge/implementation/known-issues.md #10。PyO3 の TypeError/OverflowError 漏れの封止）。
+# ラッパーで ValueError に統一する（PyO3 拡張が出す TypeError/OverflowError を利用者に漏らさないため）。
 
 def test_calc_disparity_wrapper_non_uint8_raises():
     img32 = np.zeros((40, 100), dtype=np.float32)
@@ -105,7 +105,7 @@ def _make_pattern(width: int, height: int, edge_col: int) -> np.ndarray:
 @pytest.mark.parametrize("calc_fn", _IMPLS)
 @pytest.mark.parametrize("shift", [1, -1, 3, -3, 7, -7])
 def test_calc_disparity_known_shift(shift, calc_fn):
-    """blue(c) = red(c+shift) の関係を作ると d ≈ shift になる(project_knowledge/architecture/theory.md の視差定義どおり)。"""
+    """blue(c) = red(c+shift) の関係を作ると d ≈ shift になる（視差 d は blue(c) = red(c+d) を満たすシフト量として定義）。"""
     width, height, edge_col = 140, 40, 70
     red = _make_pattern(width, height, edge_col)
     blue = _make_pattern(width, height, edge_col - shift)
@@ -117,7 +117,7 @@ def test_calc_disparity_known_shift(shift, calc_fn):
     assert np.all(np.abs(vals - shift) < 0.1), f"d が shift={shift} から乖離: {vals}"
 
 
-# ===== calcDisparityByZNCC: 入力のメモリ配置（2026-10-30 監査 IMPL-003） =====
+# ===== calcDisparityByZNCC: 入力のメモリ配置 =====
 
 def _textured_pair(h: int = 60, w: int = 120, shift: int = 2) -> tuple[np.ndarray, np.ndarray]:
     """行ごとに異なる乱数テクスチャと、それを水平に shift ずらした青（配置を取り違えると結果が変わる入力）。"""
@@ -251,7 +251,7 @@ def test_depthparams_from_dict_ok():
     assert isinstance(params.v_pos, float)
 
 
-# ===== DepthParams.from_dict: 係数の妥当性検証（2026-09 レビューで追加されたガード） =====
+# ===== DepthParams.from_dict: 係数の妥当性検証（非有限値の拒否） =====
 
 @pytest.mark.parametrize("bad_key,bad_value", [
     ("v_pos", "nan"), ("u_pos", "inf"), ("a_pos", "-inf"),

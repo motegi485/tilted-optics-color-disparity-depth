@@ -4,14 +4,14 @@
 を出力し、後段の `calibration.calibrate` → `calibration.fit_params` が live 推論 params
 （root `params/fit_result.csv`）を生成する。本スクリプトは `params/` には一切触れない。
 
-最重要要件＝校正と推論の取得条件一致（project_knowledge/modules/module-calibration.md）。そのため取得経路は推論と完全同一にする:
+最重要要件＝校正と推論の取得条件一致。そのため取得経路は推論と完全同一にする:
 `realtime.camera.WebcamSource`（取得）と共有 `preprocess`（3:2 中央クロップ 1280→1080 →
 INTER_AREA → 528×352）を **再利用** し、取得・前処理を独自に再実装しない。視差チェック（任意）
 も `core.disparity.calcDisparityByZNCC` を **読むだけ** で純関数呼び出しする。
 
-書き込み先は `data/calib_imgs/` のみ（`params/`・`outputs/` には触れない・project_knowledge/architecture/architecture.md）。プロンプト/
+書き込み先は `data/calib_imgs/` のみ（`params/`・`outputs/` には触れない）。プロンプト/
 メッセージは日本語、技術用語・パス・関数名・定数は英語のまま。入力検証は raise（assert は -O で
-無効化されるため使わない・project_knowledge/implementation/known-issues.md #10）。
+無効化されるため使わない）。
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ DEFAULT_BURST_N = 32          # バースト枚数の既定値（CLI --n で可�
 # バースト1回あたりの経過時間上限（秒）。フィードが固着（同一フレーム連発）した場合に
 # 無限ループせず「異常」として打ち切るための安全弁。np.array_equal の比較コストや実 fps に依存しない
 # time.monotonic() ベースの時間予算とする。判定は各 read の前に行うので、read 自体の所要時間は
-# 打ち切れない（read が有限時間で戻る前提。read が戻らない固着は検出できない・2026-10-30 監査 IMPL-005）。
+# 打ち切れない（read が有限時間で戻る前提。read が戻らない固着は検出できない）。
 # 目安: ~4fps 相当の控えめな前提でも DEFAULT_BURST_N(32) 枚は 8s 以内に揃う
 # （実 30fps なら約1.1s）。--n を増やしても破綻しない十分な安全弁として 8.0 を採用。
 # config.LIVE_WAIT_TIMEOUT_S（open 時のライブ待ち）とは別概念・独立。
@@ -49,7 +49,7 @@ BURST_TIMEOUT_S = 8.0
 def scan_calib_dir() -> tuple[list[Path], list[Path]]:
     """起動時の散布ガード用。calib_imgs/ の中身を「距離名 PNG」と「想定外」に分類して返す。
 
-    距離名 PNG = 拡張子 .png かつ stem が正の整数（本キャンペーンが書く形式 {dist}.png）。
+    距離名 PNG = 拡張子 .png かつ stem が正の整数（本スクリプトが書く形式 {dist}.png）。
     それ以外（非 png・非整数 stem・サブディレクトリ等）は想定外として別枠で返す。
     ディレクトリ未作成なら両方空リスト。
     """
@@ -75,7 +75,7 @@ def _is_positive_int(s: str) -> bool:
 def prompt_distance() -> int | None:
     """距離[mm]（正の整数）を対話入力する。q/quit で終了センチネル None を返す。
 
-    空入力・非正整数はクラッシュさせず再入力させる（project_knowledge/requirements/requirements.md の制約条件）。
+    空入力・非正整数はクラッシュさせず再入力させる。
     """
     while True:
         raw = input("距離[mm] を入力（正の整数）。終了は q: ").strip()
@@ -102,14 +102,14 @@ def capture_burst(source: WebcamSource, n: int) -> np.ndarray | None:
 
     平均は raw float64 累積 → /N → uint8（preprocess は呼び出し側で平均後に1回だけ適用する）。
     crop と INTER_AREA は線形なので「各フレーム preprocess 後に平均」と概ね等価だが、丸めを1回に
-    抑え計算も軽い raw 平均 → 単一 preprocess を採る（project_knowledge/modules/module-calibration.md）。
+    抑え計算も軽い raw 平均 → 単一 preprocess を採る。
 
     フレーム同一性: WebcamSource は frame_id を持たないため、直前に採用したフレームとの完全一致
     （np.array_equal）で重複を検出し skip する。実フィードはセンサノイズで毎フレーム必ず変動する
     （_wait_until_live が時間 std>0 で確認済み）ため、固着していない限り N 枚は速やかに揃う。
     バースト開始からの経過時間が BURST_TIMEOUT_S（time.monotonic() 基準）を超えたらフィード固着
     とみなし None を返す（呼び出し側で撮り直し可能に）。
-    read 失敗時も None を返し、半端・破損した平均は書き込ませない（project_knowledge/modules/module-calibration.md）。
+    read 失敗時も None を返し、半端・破損した平均は書き込ませない。
     """
     if n < 1:
         raise ValueError(f"capture_burst: n は 1 以上が必要です（渡された値: {n}）")
@@ -144,7 +144,7 @@ def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
     """preprocess 済み (352,528,3) BGR を PNG（可逆・lossless）で out_dir/{dist}.png に保存する。
 
     webcam は既に 4:2:0 で R/B 横解像が落ちているため、JPEG 保存による二重クロマ間引きを避ける
-    （PNG 必須・project_knowledge/modules/module-calibration.md）。保存前に shape=(352,528,3) を検証（IMAGE_SIZE 整合）。
+    （PNG 必須）。保存前に shape=(352,528,3) を検証（IMAGE_SIZE 整合）。
     既存ファイルがあり allow_overwrite=False のときは上書き確認を行い、否なら保存せず False を返す。
     """
     expected = (config.IMAGE_SIZE[1], config.IMAGE_SIZE[0], 3)  # (H,W,3)=(352,528,3)
@@ -166,7 +166,7 @@ def save_calib_png(proc_bgr: np.ndarray, dist: int, out_dir: Path,
 
 
 def save_calib_raw(raw_bgr: np.ndarray, dist: int, out_dir: Path, allow_overwrite: bool) -> bool:
-    """バースト平均の raw (720,1280,3) BGR を PNG（可逆）で out_dir/{dist}.png に保存する（--save-raw 用・2026-09-16）。
+    """バースト平均の raw (720,1280,3) BGR を PNG（可逆）で out_dir/{dist}.png に保存する（--save-raw 用）。
 
     処理解像度（config.IMAGE_SIZE）を変える実験では、校正画像を別解像度で作り直す必要がある。
     preprocess 前の raw を残しておけば、再撮影せずに `preprocess_to(raw, size)`（tools/analysis_common.py）で
@@ -193,12 +193,12 @@ def save_calib_raw(raw_bgr: np.ndarray, dist: int, out_dir: Path, allow_overwrit
 
 
 def run_subfunc_check(proc_bgr: np.ndarray) -> None:
-    """保存した (528,352) で視差を試算し、撮影品質を即時に診断する（project_knowledge/modules/module-calibration.md・任意）。
+    """保存した (528,352) で視差を試算し、撮影品質を即時に診断する（任意）。
 
     pipeline/evaluate と同一のチャンネル分割（cv2.split の BGR 順で G を破棄し blue/red を割当）と
-    同一 gate1（|d|>DISP_MAX を NaN）を当て、有効点数・pos/neg 点数・|d| 最大・clip 警告・
+    同一の視差上限ゲート（|d|>DISP_MAX を NaN）を当て、有効点数・pos/neg 点数・|d| 最大・clip 警告・
     calibrate 採用帯（DISP_PLOT_LOW<|d|<DISP_PLOT_HEIGHT）の予測点数を表示する。
-    推論帯（config.INFER_BAND_LOW/HIGH・2026-09-18）は掛けない: これは校正撮影の診断で、校正は校正帯を使うため。
+    推論帯（config.INFER_BAND_LOW/HIGH）は掛けない: これは校正撮影の診断で、校正は校正帯を使うため。
     core は読むだけ・純関数呼び出し・無改変。
     """
     # pipeline.process_frame / evaluate.evaluate と一致させる: blue, _, red = cv2.split(...)
@@ -206,7 +206,7 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
     disp = calcDisparityByZNCC(
         red, blue, config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
 
-    # gate1: 探索半幅超の視差を無効化（pipeline/evaluate と同一）
+    # 視差上限ゲート: 探索半幅超の視差を無効化（pipeline/evaluate と同一）
     disp[np.abs(disp) > config.DISP_MAX] = np.nan
 
     valid = ~np.isnan(disp)
@@ -222,11 +222,11 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
     abs_d = np.abs(disp)
     d_max = float(np.nanmax(abs_d))
     print(f"  [サブフィット] |d| 最大 = {d_max:.2f}px（DISP_MAX={config.DISP_MAX}）")
-    # 探索端の張り付き検知【2026-09 レビューで閾値修正】。
-    # 旧条件 `d_max >= DISP_MAX - 0.5`（=14.5）は到達不能な死にゲートだった: 視差は
+    # 探索端の張り付き検知。
+    # 閾値を `d_max >= DISP_MAX - 0.5` にすると到達不能で警告が発火しない: 視差は
     # d = max_x - s_range + δ、max_x は端2点を除いた [1, S-2]、かつ厳密局所最大の3点放物線
     # 補間では |δ| < 0.5 が代数的に保証される（A=p-n>0, B=p-q>0 として δ=(A-B)/(2(A+B))）。
-    # よって |d| < DISP_MAX - 0.5 が常に成り立ち、警告は原理的に発火しない。
+    # よって |d| < DISP_MAX - 0.5 が常に成り立つ。
     # 実際に意味があるのは「ZNCC ピークが探索できる最外シフト（max_x = S-2、すなわち
     # |d| > DISP_MAX - 1.5）に載った」ことなので、そこを閾値にし、端ビンの画素率も併記する。
     edge_bin_th = config.DISP_MAX - 1.5
@@ -246,7 +246,7 @@ def run_subfunc_check(proc_bgr: np.ndarray) -> None:
 
 
 def _startup_guard() -> bool:
-    """起動時に calib_imgs/ の現状を表示し、想定外/既存 PNG があれば続行可否を確認する（project_knowledge/modules/module-calibration.md）。
+    """起動時に calib_imgs/ の現状を表示し、想定外/既存 PNG があれば続行可否を確認する。
 
     続行してよければ True、中止なら False を返す。空ディレクトリ（または未作成）はそのまま True。
     """
@@ -272,7 +272,7 @@ def _startup_guard() -> bool:
 def _capture_one_distance(source: WebcamSource, dist: int, n: int, save_raw: bool = False) -> None:
     """1 距離分の撮影フロー: バースト → preprocess → 保存 → サブフィット(任意) → 撮り直し(任意)。
 
-    撮り直し=n になるまでループする。撮り直し時は明示的上書きを許可する（project_knowledge/modules/module-calibration.md）。
+    撮り直し=n になるまでループする。撮り直し時は明示的上書きを許可する。
     """
     is_reshoot = False
     while True:
@@ -301,7 +301,7 @@ def _capture_one_distance(source: WebcamSource, dist: int, n: int, save_raw: boo
 
 
 def run(n: int, save_raw: bool = False) -> None:
-    """対話ループ本体。webcam を起動時に1度だけ open し、全距離でその1接続を使い回す（project_knowledge/modules/module-calibration.md）。"""
+    """対話ループ本体。webcam を起動時に1度だけ open し、全距離でその1接続を使い回す。"""
     if not _startup_guard():
         print("中止しました（散布ガード）。")
         return
@@ -325,7 +325,7 @@ def run(n: int, save_raw: bool = False) -> None:
             except Exception as e:
                 # 1 距離分の処理で起きた例外（save_calib_png の imwrite 失敗 RuntimeError・
                 # cv2.error・ValueError 等）は、この距離だけスキップして原因を表示し、
-                # セッションは継続する（10 距離キャンペーン中の 1 失敗で全滅させない・project_knowledge/requirements/requirements.md）。
+                # セッションは継続する（複数距離の撮影中の 1 失敗で全滅させない）。
                 # ここでは release しない（webcam は後続距離で使い回す。release は外側 finally のみ）。
                 # 捕捉は Exception まで。KeyboardInterrupt / SystemExit は Exception 派生でないため
                 # 捕まえず外側 finally の release → main() の Ctrl-C 処理へ素通しする（誤吸収防止）。
@@ -350,7 +350,7 @@ def main() -> None:
                         help=f"バースト枚数（既定 {DEFAULT_BURST_N}）")
     parser.add_argument("--save-raw", action="store_true",
                         help=f"バースト平均の raw (1280x720) も {config.CALIB_RAW_DIR.name}/<距離>.png に保存する"
-                             "（処理解像度の実験用・2026-09-16）")
+                             "（処理解像度の実験用）")
     args = parser.parse_args()
     if args.n < 1:
         raise ValueError(f"--n は 1 以上が必要です（渡された値: {args.n}）")

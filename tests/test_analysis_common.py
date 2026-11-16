@@ -42,7 +42,7 @@ def test_settings_defaults_key_and_limits():
     s = DispSettings()
     assert (s.kernel_size, s.search_range_x, s.edge_th) == (config.KERNEL_SIZE, config.SEARCH_RANGE_X, config.EDGE_TH)
     assert s.key() == f"K{config.KERNEL_SIZE}_S{config.SEARCH_RANGE_X}_T{config.EDGE_TH}"
-    assert s.disp_max == config.DISP_MAX and s.reach_max == config.DISP_MAX - 0.5   # gate1 上限と到達上限の差 0.5
+    assert s.disp_max == config.DISP_MAX and s.reach_max == config.DISP_MAX - 0.5   # 視差上限ゲートの上限と到達上限の差 0.5
     assert DispSettings(image_size=(264, 176)).key().endswith("_W264xH176")
     for bad in (dict(kernel_size=16), dict(search_range_x=0), dict(kernel_size=True), dict(edge_th=-1),
                 dict(image_size=(0, 10))):
@@ -50,7 +50,7 @@ def test_settings_defaults_key_and_limits():
             DispSettings(**bad)
 
 
-SIZES = [(264, 176), (396, 264), (528, 352), (660, 440), (792, 528), (1056, 704)]   # B3 の 6 水準（3:2）
+SIZES = [(264, 176), (396, 264), (528, 352), (660, 440), (792, 528), (1056, 704)]   # 解像度 6 水準（3:2）
 
 
 def test_round_to_odd_and_scale_factor():
@@ -108,8 +108,8 @@ def test_calib_image_guard():
 
 
 def test_disparity_of_proc_reproduces_process_frame_after_gates():
-    """生視差に gate1＋推論帯（config.INFER_BAND_LOW/HIGH・2026-09-18）を掛けて参照式に通せば
-    process_frame とビット一致する（同じ手順の証明。実験の評価器 apply_gates と本番の定義が同じことの根拠）。"""
+    """生視差に視差上限ゲート＋推論帯（config.INFER_BAND_LOW/HIGH）を掛けて参照式に通せば
+    process_frame とビット一致する（同じ手順の証明。解析用の apply_gates と本番の定義が同じことの根拠）。"""
     proc = preprocess(_raw())
     params = DepthParams(v_pos=426165.15, u_pos=-61.04, a_pos=-26.43, w_pos=0.0,
                          v_neg=411311.86, u_neg=-17.39, a_neg=-22.76, w_neg=0.0)
@@ -120,10 +120,10 @@ def test_disparity_of_proc_reproduces_process_frame_after_gates():
     ref = process_frame(proc, params)
     assert np.array_equal(np.isnan(depth), np.isnan(ref))
     assert np.array_equal(depth[~np.isnan(depth)], ref[~np.isnan(ref)])
-    # 推論帯なし（gate1 のみ）とは一致しない＝推論帯が実際に効いていることの確認
+    # 推論帯なし（視差上限ゲートのみ）とは一致しない＝推論帯が実際に効いていることの確認
     depth_g1 = depth_of(apply_gates(disp, disp_max=config.DISP_MAX), params)
     assert np.count_nonzero(~np.isnan(depth_g1)) > np.count_nonzero(~np.isnan(ref))
-    # 到達上限: gate1 (|d| > DISP_MAX) は 1 画素も落とさない
+    # 到達上限: 視差上限ゲート (|d| > DISP_MAX) は 1 画素も落とさない
     assert np.nanmax(np.abs(disp)) <= DispSettings().reach_max
     with pytest.raises(ValueError):
         disparity_of_proc(proc[:, :, 0], DispSettings())
@@ -207,17 +207,17 @@ def test_calib_raw_cache_matches_processed_png_at_default_size(tmp_path):
         ensure_calib_disparity_from_raw(s, bad, root=tmp_path / "out_bad")   # 別キャッシュ（既存 npy の再利用を避ける）
 
 
-# ---------- キャッシュの入力識別（2026-10-30 監査 REUSE-001） ----------
+# ---------- キャッシュの入力識別 ----------
 
 def test_cache_root_uses_identity_checked_namespace(tmp_path):
-    """識別つきの置き場は cache/disp_v2/。入力を識別しない旧 cache/disp/ は読まない。"""
+    """識別つきの置き場は cache/disp_v2/。入力を識別しない従来形式の cache/disp/ は読まない。"""
     s = DispSettings()
     assert cache_root(s, tmp_path) == tmp_path / "cache" / "disp_v2" / s.key()
     assert cache_root(s).parent.name == "disp_v2"
 
 
 def test_calib_cache_rejects_same_name_from_another_campaign(tmp_path):
-    """別キャンペーンの同名 2000.png に、先に作った視差を返さない（以前は無警告で返していた）。"""
+    """別の撮影セットの同名 2000.png に、先に作った視差を返さない（無警告で返すと別入力の結果を取り違える）。"""
     s = DispSettings()
     camp_a, camp_b = tmp_path / "campaign_a", tmp_path / "campaign_b"
     for d, seed in ((camp_a, 1), (camp_b, 2)):
@@ -319,7 +319,7 @@ def test_apply_gates_and_evaluate_session():
     d[100, :10] = 2.0          # 帯内・pos
     d[150, :10] = 0.2          # 帯の下側
     d[200, :10] = -9.0         # 帯の上側
-    d[210, :10] = -20.0        # gate1 で落ちる（合成なので到達上限超えも置ける）
+    d[210, :10] = -20.0        # 視差上限ゲートで落ちる（合成なので到達上限超えも置ける）
     g = apply_gates(d, disp_max=15.0)
     assert np.isnan(g[210, 0]) and g[100, 0] == 2.0 and g[150, 0] == 0.2 and g[200, 0] == -9.0
     g2 = apply_gates(d, disp_max=15.0, band=(0.45, 7.5))

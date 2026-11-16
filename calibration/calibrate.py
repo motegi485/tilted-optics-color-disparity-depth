@@ -1,15 +1,16 @@
 """
 calibration/calibrate.py
 
-校正画像（ファイル名 = 距離[mm]。.png/.jpg/.jpeg。キャンペーン内での規格混在は下の入力ガードが拒否）から符号付き視差を求め、符号別に per-pixel RANSAC で
+校正画像（ファイル名 = 距離[mm]。.png/.jpg/.jpeg。同一の校正撮影内での規格混在は下の入力ガードが拒否）から符号付き視差を求め、符号別に per-pixel RANSAC で
 直線 row = a·disparity + b をフィットし、各距離の zero_disp(=切片 b)・傾き a・
 インライヤ率・点数を params/params.csv に出力する。
-（既存の参照実装の per-pixel RANSAC 版を本システムの構成で再現したもの）
+（先行実装 TiltedOpticsDepthIntro の校正手順＝画素ごとに ZNCC 視差を求め、行と視差の関係を直線で
+  当てはめる処理を元に、RANSAC で外れ値に頑健にしたもの）
 
 パイプライン: 校正画像 → 視差(core/disparity) → 符号別の点群抽出 → RANSAC 直線フィット → params.csv
 後段の fit_params.py が params.csv を受け取り、参照式 y0 = v/z + u をフィットする。
 
-設計原則(project_knowledge/architecture/architecture.md):
+設計方針:
   - calibration/ は core ではない。config import・I/O・matplotlib 可。
     ただし視差計算は純関数 core.disparity を config 注入で呼ぶ(校正と推論の設定を一致させる)。
   - 無効値は np.nan(0 埋め禁止)。入力検証は raise(assert は -O で無効化されるため使わない)。
@@ -39,7 +40,7 @@ def extract_sign_points(disp_map, sign, low, height):
     """指定符号の生視差画素を (disparity, row) の点群として返す(行平均はとらない)。
 
     pos 枝は 0<low<d<height、neg 枝は -height<d<-low の画素のみ採用する
-    (POF 近傍の不感帯と探索端の誤マッチを除外)。
+    (合焦面(POF: Plane Of Focus)近傍の不感帯と探索端の誤マッチを除外)。
     NaN は比較が必ず False になるため、ここで自動的に除外される。
     """
     if sign > 0:
@@ -61,7 +62,7 @@ def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
     """
     # 点数だけでは傾きの同定性を保証できない: d が全て同値だと設計行列 [d, 1] の階数が1に
     # なり、a は非同定のまま任意の値が返りうる（RANSAC_MIN_POINTS は階数を保証しない）。
-    # 呼び出し側は ValueError を「コンセンサス不成立」と同じく NaN 行として扱う（2026-09 レビュー）。
+    # 呼び出し側は ValueError を「コンセンサス不成立」と同じく NaN 行として扱う。
     n_unique = int(np.unique(d_vals).size)
     if n_unique < 2:
         raise ValueError(
@@ -74,7 +75,7 @@ def ransac_fit_line(d_vals, row_vals, residual_threshold, random_state):
     est.fit(X, row_vals)
     # 入力全体の一意値が2以上でも、最終インライヤが同じ視差だけで占められると [d, 1] の階数は1のままで、
     # 再フィットの傾きは同定できない（最小ノルム解の a=0 と行の平均が無警告で返る）。上と同じ基準を
-    # 最終コンセンサスにも課す（2026-10-30 監査 IMPL-002。閾値は追加しない）。
+    # 最終コンセンサスにも課す（新たな閾値は設けない）。
     n_unique_inlier = int(np.unique(d_vals[est.inlier_mask_]).size)
     if n_unique_inlier < 2:
         raise ValueError(
@@ -112,9 +113,9 @@ def main():
     if not image_paths:
         raise FileNotFoundError(f"キャリブレーション画像が見つかりません: {calib_dir}")
 
-    # --- 入力ガード(2026-07 レビュー): 距離名ファイルの規格混在・重複距離を事前検出する ---
-    # webcam(.png)と静止画(.jpg/.jpeg)が同一キャンペーンに混在すると、1本の params.csv に
-    # 異規格が無警告で統合されproject_knowledge/modules/module-calibration.mdの混用禁止に違反するため、ループに入る前に止める。
+    # --- 入力ガード: 距離名ファイルの規格混在・重複距離を事前検出する ---
+    # webcam(.png)と静止画(.jpg/.jpeg)が同一の校正撮影に混在すると、1本の params.csv に
+    # 異規格が無警告で統合される（取得条件が異なる画像の混用は不可）ため、ループに入る前に止める。
     dist_paths: dict[int, list[Path]] = {}
     for p in image_paths:
         try:
@@ -127,7 +128,7 @@ def main():
     if (".png" in dist_exts) and ({".jpg", ".jpeg"} & dist_exts):
         raise ValueError(
             "webcam(.png) と静止画(.jpg) の校正画像が混在しています。"
-            "キャンペーン単位で単一規格にしてください"
+            "一連の校正撮影ごとに単一の規格にしてください"
         )
 
     duplicates = {d: paths for d, paths in dist_paths.items() if len(paths) > 1}
@@ -152,7 +153,7 @@ def main():
             print(f"スキップ: 画像読み込み失敗 → {path.name}")
             continue
 
-        # 入力ガード(2026-07 レビュー): 処理解像度そのもの、または3:2アスペクト比(±1%)の
+        # 入力ガード: 処理解像度そのもの、または3:2アスペクト比(±1%)の
         # フル解像度静止画のみ許可する。raw(1280x720=16:9等)の誤投入は非等方リサイズで
         # 幾何が歪んだ params を無警告生成するため、ここで止める。
         h_raw, w_raw = image.shape[:2]
@@ -166,9 +167,9 @@ def main():
                     f"期待は処理解像度 {config.IMAGE_SIZE} 一致、"
                     f"またはアスペクト比 3:2（={expected_ratio:.4f}）±1% のフル解像度静止画"
                 )
-        image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる(project_knowledge/modules/module-calibration.md)
+        image = cv2.resize(image, config.IMAGE_SIZE)   # 推論と同一サイズにそろえる
 
-        # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる(project_knowledge/architecture/theory.md)
+        # G は分割型CF開口の両側を通過して色シフトが相殺されるため視差を持たない → 捨てる
         blue, _, red = cv2.split(image)
         # 視差計算は純関数を config 注入で呼ぶ。これで校正・推論の設定一致がコード上で保証される
         disp_map = calcDisparityByZNCC(
@@ -199,7 +200,7 @@ def main():
             print(f"  neg: 直線フィット不成立 → NaN（{e}）")
             a_neg, b_neg, mask_neg = np.nan, np.nan, np.zeros(n_neg, dtype=bool)
 
-        # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値(project_knowledge/modules/module-calibration.md)
+        # インライヤ率 = True の割合(bool 配列の平均)。校正品質の診断値
         inlier_pos = float(mask_pos.mean()) if n_pos else 0.0
         inlier_neg = float(mask_neg.mean()) if n_neg else 0.0
 
@@ -236,7 +237,7 @@ def main():
         raise RuntimeError("有効なキャリブレーション距離が1つもありませんでした。")
 
     config.PARAMS_DIR.mkdir(parents=True, exist_ok=True)
-    # 列順は既存の参照実装の params.csv に一致させる(near-match 照合のため)。
+    # 列順は先行実装(TiltedOpticsDepthIntro)の params.csv に揃える(出力形式を揃えて比較しやすくするため)。
     # スキップで追加順が乱れ得るので、距離昇順に並べ直してから出力する
     df = pd.DataFrame(rows_out, columns=[
         "depth", "zero_disp_pos", "zero_disp_neg", "a_pos", "a_neg",
@@ -245,7 +246,7 @@ def main():
     df.to_csv(config.PARAMS_CSV_PATH, index=False)         # fit_params.py への入力(全9列)
     print(f"\n{config.PARAMS_CSV_PATH} に保存（{len(df)} 距離）")
 
-    # 診断サマリ(インライヤ率・点数のみ)。校正品質の記録用(project_knowledge/modules/module-calibration.md)
+    # 診断サマリ(インライヤ率・点数のみ)。校正品質の記録用
     df[["depth", "inlier_pos", "inlier_neg", "n_pos", "n_neg"]].to_csv(
         config.DIAG_CSV_PATH, index=False)
     print(f"{config.DIAG_CSV_PATH} に診断サマリを保存")

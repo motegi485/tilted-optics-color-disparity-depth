@@ -1,27 +1,30 @@
-"""tools/analysis_common.py — 設定値の最適化実験（2026-09-16〜18・呼称は project_knowledge/INDEX.md「実験キャンペーンの呼称」）で
+"""tools/analysis_common.py — 設定値（窓の大きさ・探索幅・エッジ閾値・校正帯・処理解像度）の感度解析で
 共有する解析基盤。本番の処理経路には含まれない。
+
+これを使う `tools/analyze_*.py` は感度解析の実験例で、再現には自前の撮影データと正解距離の一覧が要る。
 
 3 つの部品からなる。いずれも **config.py の値は読むが書き換えない**（設定はすべて引数で受ける）。
 
 1. 視差キャッシュ: 設定（K・S・T・処理解像度）ごとに、保存 PNG（校正画像 `data/calib_imgs/<距離>.png`・
    校正 raw `data/calib_raw/<距離>.png`・評価 raw `data/captures/<session>/<idx>.png`）から視差マップを 1 回だけ計算して
    `outputs/cache/disp_v2/<設定キー>/...npy` に置く。校正帯・RANSAC・推論ゲートの探索は視差を変えないので、
-   キャッシュを読むだけで何百通りでも回せる。保存する視差は **gate1 前の生値**（gate は評価側で適用する）。
-   処理解像度を変える実験（B3）は raw から `preprocess_to` で作り直し、K・S を `scaled_settings` で解像度比にスケールする。
+   キャッシュを読むだけで何百通りでも回せる。保存する視差は **視差上限ゲート前の生値**（ゲートは評価側で適用する）。
+   処理解像度を変える実験は raw から `preprocess_to` で作り直し、K・S を `scaled_settings` で解像度比にスケールする。
    各 npy の横に入力の識別（`<名前>.json`: 入力画像の SHA-256・種別・設定・前処理・ネイティブ版）を置き、再利用の前に
-   照合する。一致しない・識別が無いものは使わずに ValueError で止める（2026-10-30 監査 REUSE-001。それ以前の
-   `outputs/cache/disp/` は鍵が設定と名前だけで入力を識別しないので読まない。消しもしない）。
+   照合する。一致しない・識別が無いものは使わずに ValueError で止める（同じ名前の別の入力の古い視差を黙って使わないため。
+   入力を識別しない旧形式のキャッシュ `outputs/cache/disp/` は読まない）。
 2. 校正の純関数 `calibrate_from_disparity`: 「視差マップ群 → 点抽出（`calibration.calibrate.extract_sign_points`）→
    RANSAC（`calibration.calibrate.ransac_fit_line`）→ 切片 → 参照式 curve_fit（`calibration.fit_params.model`）→
    DepthParams」を、`calibrate.py`／`fit_params.py` の main と同じ手順・同じ既定値で、ファイル I/O と print なしに行う。
    現行設定（0.45, 7.5, th=8, seed=0）で `params/params.csv`・`params/fit_result.csv` を再現することがテストの前提
    （再現性チェック）。
 3. 評価器 `evaluate_session`: 「視差スタック ＋ DepthParams ＋ ゲート → 距離別の誤差統計」。有効画素・ROI・統計量の定義は
-   `checks.evaluate_distance_accuracy` と同じ（`summarize_errors` を再利用）。推論側に校正帯を適用する実験（A4）のため、
-   gate1（|d| > disp_max）に加えて任意の帯 `band=(low, high)` の外側を無効化できる。
+   `checks.evaluate_distance_accuracy` と同じ（`summarize_errors` を再利用）。推論側にも校正帯を適用する比較のため、
+   視差上限ゲート（|d| > disp_max）に加えて任意の帯 `band=(low, high)` の外側を無効化できる。
 
-用語: `DispSettings.disp_max` は gate1 の上限（config.DISP_MAX と同じ定義 (S−1)/2）、`reach_max` は ZNCC 実装が返しうる
-|d| の上限 s_range − 0.5（端 2 ビン除外・|δ| < 0.5。project_knowledge/modules/module-core.md）。両者の差が「gate1 は到達不能」の根拠。
+用語: `DispSettings.disp_max` は視差上限ゲートの上限（config.DISP_MAX と同じ定義 (S−1)/2）、`reach_max` は ZNCC 実装が
+返しうる |d| の上限 s_range − 0.5（探索の両端 2 ビンを除外し、サブピクセル補正量 |δ| < 0.5 とするため）。
+両者の差が「視差上限ゲートには実質的に到達しない」ことの根拠。
 """
 from __future__ import annotations
 
@@ -75,7 +78,7 @@ class DispSettings:
 
     @property
     def disp_max(self) -> float:
-        """gate1 の上限 (S−1)/2（config.DISP_MAX と同じ定義）。"""
+        """視差上限ゲートの上限 (S−1)/2（config.DISP_MAX と同じ定義）。"""
         return (self.search_range_x - 1) / 2
 
     @property
@@ -90,7 +93,7 @@ class DispSettings:
         return k
 
 
-# ===== 処理解像度のスケール（解像度実験 B3） =====
+# ===== 処理解像度のスケール（処理解像度の感度解析用） =====
 
 def round_to_odd(x: float) -> int:
     """x に最も近い正の奇数を返す。2·floor(x/2)+1 なので [2n, 2n+2) → 2n+1（偶数ちょうどは上側の奇数）。"""
@@ -130,7 +133,7 @@ def scaled_settings(base: DispSettings, image_size: tuple[int, int], *, scale_ed
 def preprocess_to(raw: np.ndarray, image_size: tuple[int, int]) -> np.ndarray:
     """realtime.camera.preprocess の処理解像度を引数化した版（3:2 中央クロップ → INTER_AREA 縮小）。
 
-    image_size == config.IMAGE_SIZE のとき camera.preprocess と同一結果（テストで保証）。解像度実験（B3）用。
+    image_size == config.IMAGE_SIZE のとき camera.preprocess と同一結果（テストで保証）。処理解像度の感度解析用。
     """
     h, w = raw.shape[:2]
     if (w, h) != tuple(config.WEBCAM_NATIVE_SIZE):
@@ -152,7 +155,7 @@ def calib_image_to_proc(image: np.ndarray, image_size: tuple[int, int]) -> np.nd
 
 
 def disparity_of_proc(proc_bgr: np.ndarray, settings: DispSettings) -> np.ndarray:
-    """preprocess 済み BGR → 生の視差マップ（float32・NaN・**gate1 は適用しない**）。"""
+    """preprocess 済み BGR → 生の視差マップ（float32・NaN・**視差上限ゲートは適用しない**）。"""
     if proc_bgr.ndim != 3 or proc_bgr.shape[2] != 3 or proc_bgr.dtype != np.uint8:
         raise ValueError(f"disparity_of_proc: (H,W,3) uint8 を想定。実際は shape={proc_bgr.shape} dtype={proc_bgr.dtype}")
     blue, _, red = cv2.split(proc_bgr)
@@ -199,7 +202,7 @@ def _ensure_cached(dst: Path, src: Path, kind: str, settings: DispSettings, over
     """src の視差を dst（npy）に用意し、横に入力識別 `dst.json` を置く。
 
     既存の npy は識別が現在の入力と一致するときだけ再利用する。識別が無い・一致しないときは使わずに ValueError
-    （同じ名前の別の入力や、同じ dir で差し替えた画像の古い視差を無警告で返さない・2026-10-30 監査 REUSE-001）。
+    （同じ名前の別の入力や、同じ dir で差し替えた画像の古い視差を無警告で返さないため）。
     overwrite=True なら計算し直して npy と識別を書き直す。
     """
     meta = dst.with_suffix(".json")
@@ -249,8 +252,8 @@ def ensure_calib_disparity(settings: DispSettings, calib_dir: Path, *,
                            root: Path | None = None, overwrite: bool = False) -> dict[int, Path]:
     """校正画像（距離名 .png/.jpg）→ calib_image_to_proc → 視差 → `<cache>/calib/<距離>.npy`。戻り値は距離 → npy。
 
-    鍵は距離名なので、別の dir（別キャンペーン）の同名画像や、同じ dir で差し替えた画像は入力識別の照合で ValueError に
-    なる（以前は先に作った視差を無警告で返していた）。キャンペーンを切り替えるときは --cache-root を分ける。
+    鍵は距離名なので、別の dir（別の撮影セット）の同名画像や、同じ dir で差し替えた画像は入力識別の照合で ValueError に
+    なる。撮影セットを切り替えるときは --cache-root を分ける。
     """
     calib_dir = Path(calib_dir)
     paths = sorted(p for p in calib_dir.iterdir() if p.suffix.lower() in (".png", ".jpg", ".jpeg") and p.stem.isdigit())
@@ -327,12 +330,12 @@ def calibrate_from_disparity(disp_by_depth: dict[int, np.ndarray], *, low: float
                              ransac_th: float | None = config.RANSAC_RESIDUAL_TH,
                              ransac_seed: int = config.RANSAC_RANDOM_STATE,
                              min_points: int = config.RANSAC_MIN_POINTS) -> CalibResult:
-    """距離 → 視差マップ（gate1 前でよい。帯 low<|d|<high で抽出するため）から 8 係数を求める。
+    """距離 → 視差マップ（視差上限ゲート前でよい。帯 low<|d|<high で抽出するため）から 8 係数を求める。
 
     手順は calibrate.py（点抽出 → RANSAC・コンセンサス不成立や傾き非同定は NaN 行）と fit_params.py
     （isfinite フィルタ → 各枝 3 点未満で RuntimeError → curve_fit(p0=[400000,50], maxfev=10000) → ā は平均）に
-    一致させる。ransac_th=None は sklearn の MAD 自動。深度換算 RMSE は記録票 §5 と同じ定義
-    （各距離の切片 y0 から z = v/(y0 − u) を逆算した誤差の RMSE）。
+    一致させる。ransac_th=None は sklearn の MAD 自動。深度換算 RMSE は、各距離の切片 y0 から
+    z = v/(y0 − u) を逆算した誤差の RMSE。
     """
     if not (0.0 <= low < high):
         raise ValueError(f"calibrate_from_disparity: 0 <= low < high が必要: low={low} high={high}")
@@ -404,7 +407,7 @@ def calibrate_from_disparity(disp_by_depth: dict[int, np.ndarray], *, low: float
 # ===== 評価（checks.evaluate_distance_accuracy と同じ定義） =====
 
 def apply_gates(disp: np.ndarray, *, disp_max: float, band: tuple[float, float] | None = None) -> np.ndarray:
-    """gate1（|d| > disp_max → NaN）と、任意の推論帯（|d| <= low または |d| >= high → NaN）を適用したコピーを返す。"""
+    """視差上限ゲート（|d| > disp_max → NaN）と、任意の推論帯（|d| <= low または |d| >= high → NaN）を適用したコピーを返す。"""
     out = disp.astype(np.float32, copy=True)
     ad = np.abs(out)
     with np.errstate(invalid="ignore"):
@@ -426,7 +429,7 @@ def evaluate_session(disp_stack: np.ndarray, gt_mm: float, params: DepthParams, 
                      roi: tuple[int, int, int, int] | None = None,
                      depth_min: float = config.DEPTH_MIN, depth_max: float = config.DEPTH_MAX,
                      disp_max: float = config.DISP_MAX, band: tuple[float, float] | None = None) -> dict:
-    """視差スタック (N,H,W) → gate → 参照式 → gate2 → pooled 誤差統計（distance_accuracy と同じ列名）。"""
+    """視差スタック (N,H,W) → 視差上限ゲート → 参照式 → 距離範囲ゲート → pooled 誤差統計（distance_accuracy と同じ列名）。"""
     if disp_stack.ndim != 3:
         raise ValueError(f"evaluate_session: (N,H,W) を想定。実際は {disp_stack.shape}")
     n, h, w = disp_stack.shape

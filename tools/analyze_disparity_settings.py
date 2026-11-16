@@ -1,11 +1,14 @@
-"""tools/analyze_disparity_settings.py — ZNCC 窓 KERNEL_SIZE・エッジ閾値 EDGE_TH の最適化（設定値の最適化実験 Phase A5）。
+"""tools/analyze_disparity_settings.py — ZNCC 窓 KERNEL_SIZE・エッジ閾値 EDGE_TH の感度解析。
+
+これは設定値の感度解析の実験例で、実行には自前の撮影データ（data/captures, data/calib_imgs など）と、
+列 session,gt_mm の manifest CSV（セッション名と正解距離 [mm]）が要る。
 
 視差推定層の設定 K（ZNCC 窓・奇数）と T（Sobel エッジ閾値）を一因子ずつ振り（OFAT）、各設定で
   校正画像 10 枚 ＋ 評価各セッション連続 N フレームの視差を再計算（tools.analysis_common のキャッシュ）
-  → 固定の校正帯・RANSAC で校正 → 検証距離の精度（推論ゲートなし／校正帯ゲート）・有効画素率
-  → 時間ノイズ σ_d（連続フレームの画素ごとの標準偏差の中央値・A1 と同じ定義）
+  → 固定の校正帯・RANSAC で校正 → 検証距離の精度（推論ゲートなし＝nogate／校正帯ゲート＝bandgate）・有効画素率
+  → 時間ノイズ σ_d（連続フレームの画素ごとの標準偏差の中央値・analyze_disparity_stability と同じ定義）
   → 計算時間（同じフレームで n 回計測）
-を 1 表にまとめる。判断（精度 vs 密度 vs 速度）はユーザー。
+を 1 表にまとめる。精度・有効画素の密度・計算時間のトレードオフの判断は利用者に委ね、このスクリプトは比較表を出すだけ。
 
 出力（--out-dir、既定 outputs/analysis/disparity_settings_<日時>/）:
   settings.csv（1 行＝1 設定）/ per_session.csv（設定 × セッション × 推論ゲートの距離別指標）/ summary.json /
@@ -191,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="ZNCC 窓・エッジ閾値の一因子探索（A5）")
+    parser = argparse.ArgumentParser(description="ZNCC 窓・エッジ閾値の一因子探索")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--sessions", nargs="+", metavar="NAME")
     src.add_argument("--manifest", metavar="CSV")

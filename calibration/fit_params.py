@@ -3,23 +3,21 @@ calibration/fit_params.py
 
 params.csv（calibrate.py の出力）から参照式 y0（d=0のy座標） = v/z + u（w=0 固定）を符号別にフィットし、
 推論時に使う係数一式（v, u, w=0, ā × pos/neg）を params/fit_result.csv に書き出す。
-（先行研究の参考コードの fit_params.py を rt 構成で再現したもの。参照式作成用の表計算シートの置換）
+（先行実装 TiltedOpticsDepthIntro が表計算シートで行っていた参照式 y0 = v/z + u のフィットを、スクリプトにしたもの）
 
 パイプライン上の位置: calibrate.py → params.csv → 【本ファイル】→ fit_result.csv → core/params.load_params（推論側）
 
-参照式（project_knowledge/architecture/theory.md の式(2) で d=0, w=0 とした形）:
+参照式（4パラメータ形 z = v/(y0 - ā·d - u) + w で d=0, w=0 とした形。Fukino et al., ICECET 2024）:
     y0（d=0のy座標） = v / z + u
 各距離の zero_disp（視差0の y 座標＝直線フィットの切片 b）を z に対して上式でフィットし v, u を得る。
 ā は各距離の傾き a のサブセット平均。推論時はこれらを z = v/(y0 - ā·d - u) + w（w=0）に用いる。
 
-設計原則（project_knowledge/architecture/architecture.md）:
+設計方針:
   - calibration/ は core ではない。config import・I/O 可。scipy/pandas を直接使ってよい。
   - 入力検証は raise（assert は -O で無効化されるため使わない）。
-  - w=0 固定（2パラメータ）。根拠は project_knowledge/architecture/theory.md（過剰自由度による非物理解の回避、および
-    Fukino et al., IWAIT 2023 式(11) の参照式の形 ȳ = A/z + B との一致）。w をフリーにしない。
-    ※「Michi 経験式との整合」は誤り（Michi ISPACS 2012 式(9) は分母内の定数を持たない別形）。
-      本システムの式(2) の4パラメータ形の出所は Fukino et al., ICECET 2024 式(10)(14)。詳細は project_knowledge/architecture/theory.md。
-  - これは経験式（参照式）校正の再現であり、参考論文の幾何モデル校正（A・z_id・θ 同定）とは別物。
+  - w=0 固定（2パラメータ）。w を自由にすると自由度が過剰で非物理的な解に流れうるため、
+    参照式の形 ȳ = A/z + B（Fukino et al., IWAIT 2023）に合わせて固定する。w をフリーにしない。
+  - これは経験式（参照式）による校正であり、幾何モデルの物理パラメータ（A・z_id・θ など）を同定する校正とは別物。
 
 実行（推奨。リポジトリ root を cwd に）:
     uv run python -m calibration.fit_params
@@ -41,7 +39,7 @@ from core.params import load_params   # 出力後のラウンドトリップ確�
 
 
 # fit_result.csv に必要な係数キー（core/params.DepthParams.from_dict の要求と完全一致させること）。
-# 行順は load_params に影響しないが、先行研究の参考コードの出力順を踏襲して near-match 照合をしやすくする。
+# 行順は load_params に影響しないが、先行実装（TiltedOpticsDepthIntro）の出力順に揃えて、出力形式を比較しやすくする。
 PARAM_KEYS = ["v_pos", "u_pos", "w_pos", "a_pos",
               "v_neg", "u_neg", "w_neg", "a_neg"]
 
@@ -57,7 +55,7 @@ def _filter_finite(df: pd.DataFrame, col: str) -> pd.DataFrame:
 def model(z, v, u):
     """参照式 y0 = v/z + u（w=0 固定の2パラメータ）。
 
-    w は理論的根拠（project_knowledge/architecture/theory.md）で 0 に固定するため、モデル関数の引数に含めない。
+    w は 0 に固定するため（上のモジュール docstring 参照）、モデル関数の引数に含めない。
     w=0 の値そのものは出力側（fit_result.csv の w_pos/w_neg）で明示的に 0.0 として書き出す。
     """
     return v / z + u
@@ -66,7 +64,7 @@ def model(z, v, u):
 def _fit_branch(depths, zero_disp, label):
     """1枝（pos または neg）の curve_fit。戻り値 (v, u, 残差RMS[px])。
 
-    p0/maxfev は先行研究の参考コードと同一にして再現性を担保する。
+    p0/maxfev は先行実装（TiltedOpticsDepthIntro）と同じ値にして、結果を比較しやすくする。
     """
     popt, _ = optimize.curve_fit(
         model, depths, zero_disp, p0=[400000, 50], maxfev=10000)
@@ -103,11 +101,11 @@ def main():
             f"params.csv に必要な列がありません: {sorted(missing_cols)} "
             f"（{config.PARAMS_CSV_PATH}）")
 
-    # --- 入口チェック: depth 列の妥当性（2026-09 レビュー） ---
+    # --- 入口チェック: depth 列の妥当性 ---
     # 参照式 y0 = v/z + u は z>0 が前提（z=0 で v/z が発散し、負の距離は物理的に無意味）。
     # 重複 depth は独立な観測点にならず、2 パラメータフィットの同定性を落とす。
-    # calibrate.py の正常出力なら常に満たされるが、手編集や別キャンペーンの連結を想定して
-    # ここで止める（fit は入力を trusted としない）。
+    # calibrate.py の正常出力なら常に満たされるが、手編集や別の校正撮影分の連結を想定して
+    # ここで止める（fit は入力を信頼しない）。
     depth_raw = pd.to_numeric(df["depth"], errors="coerce").values.astype(float)
     if not np.all(np.isfinite(depth_raw)):
         raise ValueError(
@@ -124,8 +122,8 @@ def main():
     # --- フィッティング失敗行の除外（pos/neg を独立にフィルタ） ---
     # RANSAC コンセンサス不成立の行は calibrate.py が NaN を書く。isfinite でその行のみを除外する
     # （値域は制限しない）。参照式 y0(z) = v/z + u は z が大きいほど y0 → u に漸近するため、
-    # 「zero_disp > 定数」という旧フィルタは長距離校正（測定距離の拡張）で正当な小/負の切片行を無警告で
-    # 落としてしまう（2026-07 レビューで撤廃・旧 MIN_VALID_PX）。
+    # 「zero_disp > 定数」のような値域フィルタは、長距離校正で正当な小/負の切片行を無警告で
+    # 落としてしまうため使わない。
     df_pos = _filter_finite(df, "zero_disp_pos")
     df_neg = _filter_finite(df, "zero_disp_neg")
 
@@ -141,7 +139,7 @@ def main():
     zero_disp_neg = df_neg["zero_disp_neg"].values.astype(float)
 
     # --- 参照式フィット（符号別。w=0 固定の2パラメータ） ---
-    # pos = 視差 d>0 側、neg = d<0 側。前ぼけ/後ろぼけの物理ラベルは【要検証】のため使わない（project_knowledge/architecture/theory.md）。
+    # pos = 視差 d>0 側、neg = d<0 側。前ぼけ/後ろぼけの物理ラベルは付けない（符号と物理的なぼけ方向の対応は断定しない）。
     v_pos, u_pos, _ = _fit_branch(depths_pos, zero_disp_pos, "pos (d>0)")
     v_neg, u_neg, _ = _fit_branch(depths_neg, zero_disp_neg, "neg (d<0)")
     w_pos = w_neg = 0.0
