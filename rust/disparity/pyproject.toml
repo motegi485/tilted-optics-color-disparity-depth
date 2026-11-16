@@ -7,6 +7,8 @@ name = "rt-disparity-native"
 version = "0.1.1"
 requires-python = ">=3.14"
 description = "calcDisparityByZNCC の Rust(PyO3) 実装（core/disparity.py から呼び出す内部拡張）"
+license = "BSD-3-Clause"
+authors = [{ name = "motegi485" }]
 
 [tool.maturin]
 module-name = "_rt_disparity_native"

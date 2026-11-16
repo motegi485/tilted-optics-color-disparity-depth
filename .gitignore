@@ -19,14 +19,11 @@ Thumbs.db
 # Rust build artifacts
 target/
 
-# 内部文書（別の Private リポジトリ。追跡しない）
-/project_knowledge/
-
-# Claude
+# AI エージェント用のローカル設定
 .claude/settings.local.json
 CLAUDE.local.md
 
-# 実行時の生成物
+# 実行時の生成物（撮影データ・出力。サンプルは assets/sample/ にある）
 data/calib_imgs/*
 !data/calib_imgs/.gitkeep
 data/calib_raw/*

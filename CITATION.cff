@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: >-
+  このソフトウェアを研究などで利用する場合は、下記の情報での引用をお願いします（お願いであり、
+  利用条件ではありません。ライセンスは LICENSE のとおり BSD-3-Clause です）。
+  If you use this software in your research, please cite it as below
+  (this is a request, not a condition of use; the license is BSD-3-Clause, see LICENSE).
+title: "tilted-optics-color-disparity-depth"
+abstract: >-
+  アオリ光学系と分割型カラーフィルタ開口を組み合わせた単眼距離推定のリアルタイム実装例。
+  Real-time monocular depth estimation example using tilted (Scheimpflug) optics and a split color-filter aperture.
+type: software
+version: 0.1.0
+authors:
+  - name: "motegi485"
+license: BSD-3-Clause
+repository-code: "https://github.com/motegi485/tilted-optics-color-disparity-depth"
+keywords:
+  - depth estimation
+  - tilted optics
+  - Scheimpflug
+  - color-filter aperture
+  - color disparity

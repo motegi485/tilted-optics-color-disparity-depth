@@ -1,0 +1,57 @@
+Third-party notices / 第三者のコードに関する表示
+================================================
+
+このリポジトリのコードは、原則として LICENSE（BSD-3-Clause）で提供する。
+ただし、次の部分は下記の MIT ライセンスのコードを元にしており、その著作権表示と許諾文をここに保持する。
+
+元になったコード
+----------------
+TiltedOpticsDepthIntro
+https://github.com/aoifukino/TiltedOpticsDepthIntro
+Copyright (c) 2025 aoi1115
+ライセンス: MIT（全文は本ファイルの末尾）
+
+このリポジトリで、元のコードに由来する部分
+------------------------------------------
+- core/_disparity_reference.py
+    元のリポジトリの `calcDisparityByZNCC`（縦エッジ画素での R/B チャンネルの ZNCC 水平探索と、
+    3 点放物線によるサブピクセル補間）を元にした Python 実装。変数名の変更、NaN による無効画素の扱い、
+    入力検証、画像端・探索端の扱い、同値ピークの除外などを加えてある。
+- rust/disparity/src/lib.rs
+    上の Python 実装を Rust に移植したもの（出力は上の Python 実装と数値照合している）。
+
+手順や出力形式を参考にしただけの部分（元のコードのコピーではない）
+------------------------------------------------------------------
+- calibration/calibrate.py、calibration/fit_params.py、core/depth.py、core/params.py
+    元のリポジトリの校正手順（視差と行 y の関係の直線当てはめ、符号ごとの係数、params.csv の列構成）と
+    参照式 z = v / (y - a*d - u) + w の枠組みに沿って、書き直したもの。
+    RANSAC による当てはめ、ベクトル化、係数の検証などは、このリポジトリで加えたもの。
+
+BSD-3-Clause（LICENSE）は、このリポジトリ独自の部分に適用する。上記の元のコードに由来する部分は、
+MIT ライセンスの条件（著作権表示と許諾文の保持）も満たす。
+
+依存ライブラリ（NumPy、SciPy、pandas、scikit-learn、matplotlib、OpenCV、PyO3、rayon など）は、
+このリポジトリに同梱していない。それぞれのライセンスに従って、利用者が各自で入手する。
+
+----------------------------------------------------------------------
+MIT License (TiltedOpticsDepthIntro)
+
+Copyright (c) 2025 aoi1115
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
