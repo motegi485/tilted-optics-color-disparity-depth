@@ -50,7 +50,7 @@ def test_extract_sign_points_excludes_nan():
     assert rows.tolist() == [0.0]
 
 
-# ===== calibrate.py C-3 入力ガード =====
+# ===== calibrate.py 入力ガード =====
 
 def test_calibrate_rejects_mixed_extensions(tmp_path, monkeypatch):
     (tmp_path / "1400.png").touch()
@@ -113,7 +113,7 @@ def test_ransac_fit_line_fits_known_line():
     assert int(inlier_mask.sum()) == len(d_vals)
 
 
-# ===== fit_params.py C-2 isfinite フィルタ =====
+# ===== fit_params.py isfinite フィルタ =====
 
 def test_filter_finite_keeps_negative_intercept_drops_nan():
     df = pd.DataFrame({"zero_disp_pos": [238.5, -50.0, np.nan, 5.0]})

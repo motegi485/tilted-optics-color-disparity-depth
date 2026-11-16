@@ -36,7 +36,7 @@ def test_preprocess_wrong_size_raises():
 
 
 def test_preprocess_crop_wider_than_raw_raises(monkeypatch):
-    """D-2: WEBCAM_CROP_W が raw 幅を超える設定だと負インデックス crop になるため raise。"""
+    """WEBCAM_CROP_W が raw 幅を超える設定だと負インデックス crop になるため raise。"""
     monkeypatch.setattr(config, "WEBCAM_CROP_W", NATIVE_W + 100)
     with pytest.raises(ValueError):
         preprocess(_raw())
@@ -148,7 +148,7 @@ def test_videofilesource_missing_raises(tmp_path):
 
 
 def test_videofilesource_double_open_raises(tmp_path):
-    """D-2: 多重 open はハンドルリーク防止のため raise。"""
+    """多重 open はハンドルリーク防止のため raise。"""
     src = VideoFileSource(tmp_path / "whatever.mp4")
     src.cap = object()   # 既に open 済みを装う
     with pytest.raises(RuntimeError):
@@ -170,7 +170,7 @@ def test_webcamsource_release_is_idempotent():
 
 
 def test_webcamsource_double_open_raises():
-    """D-2: 多重 open はハンドルリーク防止のため raise。"""
+    """多重 open はハンドルリーク防止のため raise。"""
     src = WebcamSource()
     src.cap = object()   # 既に open 済みを装う
     with pytest.raises(RuntimeError):

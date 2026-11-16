@@ -455,9 +455,6 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-HOLD_FRAMES = 4   # valid-hold: 現在のフレームに、直前の (HOLD_FRAMES - 1) フレームを重ねて有効画素を保持する
-
-
 def hold_valid(depth: np.ndarray, history) -> np.ndarray:
     """ライブ表示用: 現在のフレームで無効（NaN）の画素を、直前のフレームの有効値で埋めた depth を返す。
 
@@ -568,7 +565,7 @@ def run(
 
     hold_on = True                                    # ライブ表示の valid-hold（v キーで切替）
     show_overlay = True                               # HUD と操作ヒントの表示（h キーで切替）
-    history: deque = deque(maxlen=HOLD_FRAMES - 1)    # 直前の depth（新しい順・valid-hold 用）
+    history: deque = deque(maxlen=config.HOLD_FRAMES - 1)    # 直前の depth（新しい順・valid-hold 用）
 
     def render(d: np.ndarray) -> np.ndarray:          # depth -> 距離カラーマップ（カラーバー付き）
         c = to_colormap(d, config.DEPTH_MIN, config.DEPTH_MAX)

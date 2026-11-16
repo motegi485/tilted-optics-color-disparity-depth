@@ -62,6 +62,10 @@ WEBCAM_CROP_W        = 1080              # 3:2 中央クロップ幅（高さは
 LIVE_WAIT_TIMEOUT_S = 8.0    # 実フィード待ちの上限（cold-start 実測 ~3.3s に余裕）
 LIVE_DIFF_STD_TH    = 0.5    # 時間方向の画素 std 閾値（placeholder=0.0 / live≈1.3）
 
+# ===== ライブ表示（表示専用。保存する npy・viz・動画には影響しない）=====
+# valid-hold: 現在のフレームに、直前の (HOLD_FRAMES - 1) フレームを重ね、一度でも有効だった画素を残して明滅を減らす
+HOLD_FRAMES = 4
+
 # ===== セッション動画（閲覧デバッグ専用。canonical は連番 PNG/npy のまま）=====
 SESSION_VIDEO_FPS = 30.0                      # 記録tickの目標fps。webcam実効fpsに合わせ等倍再生で実時間になる
 SESSION_VIDEO_FOURCC = "mp4v"                 # OpenCV同梱FFmpegで追加DLL不要（avc1はWindowsで非同梱のことがある）

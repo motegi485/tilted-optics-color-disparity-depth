@@ -92,7 +92,7 @@ def test_calc_disparity_wrapper_shape_mismatch_raises():
 
 def _make_pattern(width: int, height: int, edge_col: int) -> np.ndarray:
     """縦エッジ1本＋微小ノイズ(±3)を持つ列パターンを全行に複製する。
-    ノイズは EDGE_TH=30 未満に抑え、エッジ以外を ZNCC タイにしない(C-1)ためのもの。
+    ノイズは EDGE_TH=30 未満に抑え、エッジ以外を ZNCC タイにしない（タイは NaN になる）ためのもの。
     """
     rng = np.random.default_rng(42)
     base = 100 + rng.integers(-3, 4, size=width)
@@ -168,12 +168,12 @@ def test_calc_disparity_wrapper_passes_c_contiguous_input_without_copy(monkeypat
     assert np.array_equal(seen[-1][0], red) and np.array_equal(seen[-1][1], blue)
 
 
-# ===== calcDisparityByZNCC: C-1 タイ・プラトー → NaN =====
+# ===== calcDisparityByZNCC: タイ・プラトー → NaN =====
 
 @pytest.mark.parametrize("calc_fn", _IMPLS)
 @pytest.mark.parametrize("blue_const", [128, 255])
 def test_calc_disparity_flat_blue_becomes_all_nan(blue_const, calc_fn):
-    """blue が全面定数（平坦・飽和）だと全シフト同値のタイになり、有効画素は0になる(C-1)。"""
+    """blue が全面定数（平坦・飽和）だと全シフト同値のタイになり、有効画素は0になる。"""
     height, width = 60, 100
     red = np.full((height, width), 50, dtype=np.uint8)
     red[:, 50:] = 200   # 縦エッジ1本

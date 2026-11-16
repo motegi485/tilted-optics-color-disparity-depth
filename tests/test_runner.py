@@ -66,7 +66,7 @@ def test_to_colormap_matches_reference_formula_in_range():
 
 
 def test_to_colormap_vmax_le_vmin_raises():
-    """D-2: vmax <= vmin は正規化が破綻するため raise。"""
+    """vmax <= vmin は正規化が破綻するため raise。"""
     depth = np.array([[1.0]], dtype=np.float32)
     with pytest.raises(ValueError):
         to_colormap(depth, vmin=100.0, vmax=100.0)
