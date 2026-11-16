@@ -39,7 +39,7 @@ def test_parse_gt_from_session_name():
 
 def test_parse_gt_rejects_out_of_range():
     """runner 既定のセッション名（日時）を渡すと末尾の時刻 101530 が距離に化けるので、
-    gate2 レンジ外（DEPTH_MAX=50000 超）として拒否する。"""
+    gate2 レンジ外（DEPTH_MAX 以上）として拒否する。"""
     with pytest.raises(ValueError):
         parse_gt_from_session_name("20260915_101530")
     with pytest.raises(ValueError):

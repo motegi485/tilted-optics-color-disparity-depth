@@ -6,7 +6,7 @@ Path A: realtime.pipeline.process_frame（実モジュール）
 Path B: evaluate.py の core 手順を独立に再現（split → disparity → gate1 → 推論帯 → compute_depth）
 両者の depth マップが NaN 位置・有限値とも厳密一致することを確認する。
 
-gate2(0<z<50000) は両経路とも適用しない（runner 表示側の責務）。深度精度ではなく
+gate2(0<z<DEPTH_MAX) は両経路とも適用しない（比較は gate2 の前の depth マップで行う）。深度精度ではなく
 経路の同値性の確認なので、webcam 校正の有無に関係なく実施可。params は baseline 確定値を使う。
 
 実行: uv run python -m checks.verify_pipeline_equivalence

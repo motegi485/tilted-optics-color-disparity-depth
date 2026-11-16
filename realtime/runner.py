@@ -19,7 +19,7 @@
 frame_id 一致で空回りを検出し 1ms sleep して待つ（下の計算ループ参照）ので、いずれの
 速度関係でも Lock のみで正しく動く。
 
-gate2（Z レンジ 0<z<50000）はここ（表示側）で vmin/vmax として適用し、process_frame が
+表示の距離レンジ（config.DEPTH_MIN〜DEPTH_MAX）はここ（表示側）で vmin/vmax として使い、process_frame が
 返す depth マップは書き換えない（書き換えると evaluate.py の depth マップとビット一致しなく
 なる・project_knowledge/requirements/requirements.md）。録画する depth は NaN を保持した float32 をそのまま np.save する（唯一の真実）。
 表示用カラーマップは使い捨てコピー上で NaN を潰すだけで、元 depth には触れない。
@@ -50,6 +50,7 @@ import logging
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -72,22 +73,24 @@ logger = logging.getLogger(__name__)
 def to_colormap(depth: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     """depth(float32, NaN 伝播) -> 表示用 BGR uint8。元 depth は一切書き換えない。
 
-    gate2 の「表示側適用」の実体: [vmin, vmax]=[DEPTH_MIN, DEPTH_MAX] を 0..255 へ線形
-    マッピングして固定スケールでカラーマップ化する（毎フレーム自動スケールしないことで、
-    動画として見たとき色変化＝被写体変化と読める）。JET は小さい値ほど青・大きい値ほど赤
-    になる並びのため、反転（255-u8）してから適用し「近いほど赤・遠いほど青」にする。
-    NaN（測定不能）は近接(z≈0=赤)と弁別するため専用色（黒）で塗る。車載では警告/制動などの
-    判断は元 depth(npy)を読む前提で、これはあくまで人間が眺めるための投影（情報を落とした
-    見た目であり判断根拠にはしない）。
+    [vmin, vmax]=[DEPTH_MIN, DEPTH_MAX] を 0..255 へ線形マッピングして固定スケールで
+    カラーマップ化する（毎フレーム自動スケールしないことで、動画として見たとき色変化＝被写体変化と
+    読める）。JET は小さい値ほど青・大きい値ほど赤になる並びのため、反転（255-u8）してから
+    適用し「近いほど赤・遠いほど青」にする。
+    無効な画素は黒で塗る。無効とは NaN（測定不能）と、範囲外（z <= vmin または z >= vmax）のこと。
+    範囲外を端の色にクランプすると近接の赤などに見えてしまうため、checks/ の距離範囲ゲート
+    （0 < z < DEPTH_MAX）と同じく無効として扱う。これは見た目だけの処理で、保存する depth(npy) は
+    変えない。
     """
     if vmax <= vmin:
         raise ValueError(f"to_colormap: vmax({vmax}) は vmin({vmin}) より大きい必要があります")
-    invalid = np.isnan(depth)                         # 無効画素の位置を先に確保（潰す前に）
+    valid = (depth > vmin) & (depth < vmax)           # NaN との比較は False なので NaN も無効になる
     scaled = (np.nan_to_num(depth, nan=vmin) - vmin) / (vmax - vmin) * 255.0
     u8 = np.clip(scaled, 0, 255).astype(np.uint8)     # NaN を uint8 へ直接 astype すると不定値化するため必ず潰してから
     color = cv2.applyColorMap(255 - u8, cv2.COLORMAP_JET)  # 反転: 近い(小さいz)ほど赤、遠い(大きいz)ほど青
-    color[invalid] = (0, 0, 0)                        # 無効は黒（赤=近接 と一目で弁別）
-    return color
+    # 無効は黒。bool マスクの 3ch 代入（color[invalid]=0）より、マスク付き bitwise_and の方が
+    # 約 10 倍速い（有効画素は全体の数 % で、大半が黒になるため）。
+    return cv2.bitwise_and(color, color, mask=valid.view(np.uint8))
 
 
 def draw_colorbar(img: np.ndarray, vmin: float, vmax: float, *, num_ticks: int = 6) -> None:
@@ -95,7 +98,7 @@ def draw_colorbar(img: np.ndarray, vmin: float, vmax: float, *, num_ticks: int =
 
     to_colormap と同じ反転 JET マッピング（近い(小さいz)ほど赤・遠い(大きいz)ほど青）をバー内で
     再現し、近距離(赤)をバー下端・遠距離(青)をバー上端に置く（値が下から上へ増加する、通常の
-    グラフ縦軸と同じ向き）。目盛りラベルは mm 表記（config.DEPTH_MIN/DEPTH_MAX の生値）。
+    グラフ縦軸と同じ向き）。目盛りラベルは m 単位（vmin/vmax は mm で渡し、表示時に 1000 で割る）。
     黒の太線+白の細線の二重描画で、_draw_hud と同様に背景色に依らず読めるようにする。
     """
     if vmax <= vmin:
@@ -125,13 +128,16 @@ def draw_colorbar(img: np.ndarray, vmin: float, vmax: float, *, num_ticks: int =
         t = i / (num_ticks - 1)                          # 0(上端)→1(下端)
         y = int(round(y1 + t * (bar_h - 1)))
         val = vmax - t * (vmax - vmin)
-        label = f"{val:.0f}"
+        label = f"{val / 1000.0:g}"                      # 目盛りは m 単位（0, 1, 2, ...）
         cv2.line(img, (x1 - 5, y), (x1 - 1, y), (0, 0, 0), 3, cv2.LINE_AA)
         cv2.line(img, (x1 - 5, y), (x1 - 1, y), (255, 255, 255), 1, cv2.LINE_AA)
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
         tx, ty = x1 - 8 - tw, y + th // 2
         cv2.putText(img, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 2, cv2.LINE_AA)
         cv2.putText(img, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
+    unit_pos = (x1 - 2, y1 - 4)                          # バー上端の上に単位 "m" を添える
+    cv2.putText(img, "m", unit_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(img, "m", unit_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
 
 
 class _FrameGrabber:
@@ -452,6 +458,47 @@ def _write_session_meta(outputs_dir: Path, params: DepthParams, params_path: str
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+HOLD_FRAMES = 4   # valid-hold: 現在のフレームに、直前の (HOLD_FRAMES - 1) フレームを重ねて有効画素を保持する
+
+
+def hold_valid(depth: np.ndarray, history) -> np.ndarray:
+    """ライブ表示用: 現在のフレームで無効（NaN）の画素を、直前のフレームの有効値で埋めた depth を返す。
+
+    縦エッジ上の有効画素は毎フレーム 2 割ほど入れ替わり、そのまま表示すると点が明滅して見える。
+    直前の数フレームで一度でも有効だった画素を残すと、明滅が減る（代わりに、動く物体の後ろに
+    数フレーム分の残像が出る）。history は新しい順の depth の並び。入力は書き換えない。
+    この処理は表示専用で、保存する depth(npy)・viz・セッション動画には使わない。
+    """
+    out = depth.copy()
+    for prev in history:
+        fill = np.isnan(out) & ~np.isnan(prev)
+        out[fill] = prev[fill]
+    return out
+
+
+def _put_text(img: np.ndarray, text: str, org: tuple[int, int], scale: float = 0.5) -> None:
+    """背景色に依らず読めるよう、黒の太線＋白の細線で文字を描く（in-place）。"""
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def compose_live_view(proc_bgr: np.ndarray, depth_panel: np.ndarray, *,
+                      hold_on: bool, show_overlay: bool) -> np.ndarray:
+    """ライブ表示用に、左に入力画像・右に距離マップを並べた画像を作る。
+
+    入力画像と距離マップを同時に見られるようにするための表示専用の画像で、保存はしない。
+    入力画像・距離マップの下端に名前を入れ、show_overlay のときは操作キーと valid-hold の状態も書く。
+    """
+    left = proc_bgr.copy()
+    right = depth_panel.copy()
+    h = left.shape[0]
+    _put_text(left, "Input", (8, h - 10))
+    _put_text(right, "Distance map", (8, h - 10))
+    if show_overlay:
+        _put_text(left, f"[v] hold {'ON' if hold_on else 'OFF'}   [h] hide info   [q] quit", (8, 22), 0.5)
+    return np.hstack([left, right])
+
+
 def _draw_hud(img: np.ndarray, *, fps: float | None, ms: float, valid: int, frame_id: int) -> None:
     """表示画像へ cFPS / ms / 有効画素数 / frame_id をオーバレイ（ASCII のみ・in-place）。
 
@@ -516,6 +563,16 @@ def run(
     last_id = -1
     ema_fps: float | None = None                      # 処理レートの指数移動平均（表示用の平滑値）
 
+    hold_on = True                                    # ライブ表示の valid-hold（v キーで切替）
+    show_overlay = True                               # HUD と操作ヒントの表示（h キーで切替）
+    history: deque = deque(maxlen=HOLD_FRAMES - 1)    # 直前の depth（新しい順・valid-hold 用）
+
+    def render(d: np.ndarray) -> np.ndarray:          # depth -> 距離カラーマップ（カラーバー付き）
+        c = to_colormap(d, config.DEPTH_MIN, config.DEPTH_MAX)
+        if colorbar:
+            draw_colorbar(c, config.DEPTH_MIN, config.DEPTH_MAX)
+        return c
+
     display_slot: _LatestFrameSlot | None = None
     recorder: _SessionVideoRecorder | None = None
     if record_video:
@@ -529,6 +586,9 @@ def run(
 
     try:
         with source as src:                           # __enter__ で open
+            # 大きな画面・プロジェクタで見られるよう、ウィンドウの大きさを変えられるようにする（縦横比は保つ）。
+            # 画像は拡大表示されるだけで、計算・保存には影響しない。
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
             grabber = _FrameGrabber(src)
             grabber.start()
             if recorder is not None:
@@ -548,9 +608,17 @@ def run(
                     depth = process_frame(proc, params)  # -> depth_map（NaN 伝播・視差ゲート gate1＋推論帯のみ適用済み・gate2 は表示側）
                     dt = time.perf_counter() - t0      # 純粋な per-frame 計算時間（cFPS 表示の素データ）
 
-                    color = to_colormap(depth, config.DEPTH_MIN, config.DEPTH_MAX)  # クリーン版を1回だけ生成
-                    if colorbar:
-                        draw_colorbar(color, config.DEPTH_MIN, config.DEPTH_MAX)  # 保存する viz にも含める
+                    # color: 保存する viz とセッション動画の元になるクリーン版（valid-hold を掛けない）。
+                    # どちらも使わないとき（--no-record・動画なし）は作らない。
+                    need_clean = (record and save_viz) or display_slot is not None
+                    color = render(depth) if need_clean else None
+                    # live_color: ライブ表示用。hold_on のときだけ、直前の数フレームの有効値で埋める。
+                    live_depth = hold_valid(depth, history) if (hold_on and history) else depth
+                    if live_depth is depth and color is not None:
+                        live_color = color.copy()       # HUD はライブ表示とセッション動画で別々に描く
+                    else:
+                        live_color = render(live_depth)
+                    history.appendleft(depth)
 
                     if record:                         # 消費フレームのみ保存（raw->captures, depth->outputs）
                         idx = processed
@@ -575,13 +643,20 @@ def run(
                                     processed, fid, dt * 1000.0, inst_fps, n_valid)
                     processed += 1                      # 連番 index と処理数（先頭=0。log は 0,log_every,... で発火）
 
-                    _draw_hud(color, fps=ema_fps, ms=dt * 1000.0, valid=n_valid, frame_id=fid)
                     if display_slot is not None:        # セッション動画の depth 側（サンプル&ホールドの供給元）
-                        display_slot.update(color)
-                    cv2.imshow(window_name, color)
+                        _draw_hud(color, fps=ema_fps, ms=dt * 1000.0, valid=n_valid, frame_id=fid)
+                        display_slot.update(color)      # 動画は valid-hold・表示切替の影響を受けない
+                    if show_overlay:
+                        _draw_hud(live_color, fps=ema_fps, ms=dt * 1000.0, valid=n_valid, frame_id=fid)
+                    cv2.imshow(window_name, compose_live_view(
+                        proc, live_color, hold_on=hold_on, show_overlay=show_overlay))
                     key = cv2.waitKey(1) & 0xFF
                     if key in (ord("q"), 27):          # q or ESC で終了
                         break
+                    if key == ord("v"):                # valid-hold の ON/OFF
+                        hold_on = not hold_on
+                    elif key == ord("h"):              # HUD と操作ヒントの表示/非表示
+                        show_overlay = not show_overlay
             finally:
                 if recorder is not None:
                     recorder.stop_and_join()           # grabber より先に止める（セッション終了後の書き込みを止める）

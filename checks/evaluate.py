@@ -18,13 +18,13 @@ from core.depth import compute_depth
 from core.params import load_params
 
 
-# project_knowledge/implementation/verification-and-tools.md の回帰アンカー（DEPTH_MAX=50000・params/baseline/ 前提）。
-# 2026-09-18 に設定変更（K17/S31/T30・gate1 のみ → K25/S41/T20・gate1＋推論帯 (0.45, 5)）に伴い取り直した値
-# （実測 平均 2213.3627 / MAE 218.9271 / 有効 6339・記録票 2026-09-18 §8）。baseline 係数は旧設定の静止画校正値のままなので
-# 距離の物理的な正しさではなく「計算経路が変わっていないこと」を検出するアンカーである。
-# 旧設定のアンカー（2026-06-14 確定）: 平均 2313.9 / MAE 316.8 / 有効画素 7613（config を旧値に戻せば再現する）。
+# 回帰アンカー（K25/S41/T20・推論帯 (0.45, 5)・DEPTH_MAX=5000・params/baseline/ 前提）。
+# baseline 係数は旧設定の静止画校正値のままなので、距離の物理的な正しさではなく
+# 「計算経路が変わっていないこと」を検出するためのアンカーである。
+# 距離範囲ゲート（0 < z < DEPTH_MAX）の上限を 50000 から 5000 に変更した際に取り直した
+# （50000 のときの値は 平均 2213.4 / MAE 218.9 / 有効画素 6339）。
 EXPECTED = {
-    "2300.jpg": {"mean": 2213.4, "mae": 218.9, "valid": 6339},
+    "2300.jpg": {"mean": 2200.5, "mae": 207.1, "valid": 6318},
 }
 TOL_MM = 0.05   # 平均・MAE の許容差（表示精度 0.1mm の半分）
 

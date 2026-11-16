@@ -2,18 +2,14 @@
 # -*- coding: utf-8 -*-
 """tools/render_depth_viz.py — 保存済みの深度 npy から、表示レンジを変えて viz PNG を再生成する。
 
-背景（2026-09-16）:
-  runner が保存する ``outputs/<session>/<idx>_viz.png`` は、撮影時の ``config.DEPTH_MIN``/``DEPTH_MAX``
-  （表示レンジ＝gate2 の表示側適用）で固定スケール化した見た目である。表示レンジは ``to_colormap`` の
-  vmin/vmax にだけ効き、保存される深度 npy には影響しない（``realtime/pipeline.py``: gate2 は適用しない／
-  ``project_knowledge/modules/module-realtime.md``「表示・保存」）。2026-09-15 の距離別精度キャンペーンは ``DEPTH_MAX=50000``
-  のまま撮影したため 1.3–3.3 m の板が全部「赤」に潰れて見えるが、npy は無事なので再撮影せず本ツールで
-  再描画する。``meta.json`` は表示レンジを記録しない（``project_knowledge/implementation/known-issues.md``）ため、出力フォルダ名に
-  レンジを含めて事後追跡できるようにする。
+用途:
+  runner が保存する ``outputs/<session>/<idx>_viz.png`` は、録画時の ``config.DEPTH_MIN``/``DEPTH_MAX``
+  で色を固定スケール化した見た目である。表示レンジは ``to_colormap`` の vmin/vmax にだけ効き、保存される
+  深度 npy には影響しない。別のレンジ（たとえば 1–4 m）で見たいときは、再撮影せずに npy から再描画できる。
+  出力フォルダ名にレンジを含めるので、どのレンジで描いた画像かを後から追える。
 
 色の割り当ては runner と同じ ``to_colormap``／``draw_colorbar`` を呼ぶ（反転 JET・近いほど赤・遠いほど青・
-NaN は黒）。``config.py`` の値は書き換えない（``DEPTH_MAX`` は ``checks.evaluate`` の回帰アンカーと
-``checks.evaluate_distance_accuracy`` の gate2 にも使われるため）。**`config.py` に依存する**
+NaN は黒）。``config.py`` の値は書き換えない。**`config.py` に依存する**
 （既定の ``OUTPUTS_DIR``・``DEPTH_MIN``/``DEPTH_MAX``）。
 
 実行例（リポジトリ root・PowerShell）:

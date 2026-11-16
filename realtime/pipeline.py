@@ -4,7 +4,7 @@ evaluate.py の per-frame core パスと同一手順で depth マップを返す
 ZNCC → gate1(|d|>DISP_MAX) → 推論帯(|d|<=INFER_BAND_LOW または |d|>=INFER_BAND_HIGH を NaN・2026-09-18 新設)
 → depth）ことが、ふるまい一致（project_knowledge/requirements/requirements.md）の前提。
 config は読むが注入、pipeline は core ではない（config import 可）が計算の中核は
-core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<50000) は適用しない――
+core 純関数を呼ぶだけに留める。gate2(Z レンジ 0<z<DEPTH_MAX) は適用しない――
 runner の表示側で vmin/vmax として適用する（depth マップを書き換えると evaluate.py の
 ものとふるまい一致しなくなるため）。入力検証は raise（assert は -O で無効化・project_knowledge/implementation/known-issues.md #10）。
 """
@@ -55,5 +55,5 @@ def process_frame(proc_bgr, params):
         params.v_neg, params.u_neg, params.a_neg, params.w_neg,
         config.EPS_DEN)
 
-    # gate2（Z レンジ 0<z<50000）はここでは適用しない（runner 表示側の責務）
+    # gate2（Z レンジ 0<z<DEPTH_MAX）はここでは適用しない（runner 表示側の責務）
     return depth

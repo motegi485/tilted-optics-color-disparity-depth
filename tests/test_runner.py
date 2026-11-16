@@ -15,7 +15,9 @@ from realtime.runner import (
     _session_video_paths,
     _SessionVideoRecorder,
     _write_session_meta,
+    compose_live_view,
     draw_colorbar,
+    hold_valid,
     run,
     to_colormap,
 )
@@ -41,6 +43,27 @@ def test_to_colormap_finite_values_not_black():
     assert tuple(int(c) for c in color[0, 0]) != (0, 0, 0)
 
 
+def test_to_colormap_out_of_range_is_black_like_nan():
+    """範囲外（z <= vmin、z >= vmax）は端の色にクランプせず、NaN と同じ黒（無効）にする。"""
+    depth = np.array([[-5.0, 0.0, 1.0, 4999.0, 5000.0, 9000.0, np.nan, np.inf]], dtype=np.float32)
+    color = to_colormap(depth, vmin=0.0, vmax=5000.0)
+    black = (0, 0, 0)
+    assert [tuple(int(c) for c in color[0, i]) == black for i in range(8)] == \
+        [True, True, False, False, True, True, True, True]
+
+
+def test_to_colormap_matches_reference_formula_in_range():
+    """範囲内の画素の色は、固定スケール＋反転 JET の素直な実装と一致する（高速化の回帰）。"""
+    rng = np.random.default_rng(0)
+    depth = rng.uniform(1.0, 4999.0, (20, 30)).astype(np.float32)
+    depth[rng.random(depth.shape) < 0.3] = np.nan
+    expected = cv2.applyColorMap(
+        255 - np.clip((np.nan_to_num(depth, nan=0.0) - 0.0) / 5000.0 * 255.0, 0, 255).astype(np.uint8),
+        cv2.COLORMAP_JET)
+    expected[np.isnan(depth)] = 0
+    np.testing.assert_array_equal(to_colormap(depth, 0.0, 5000.0), expected)
+
+
 def test_to_colormap_vmax_le_vmin_raises():
     """D-2: vmax <= vmin は正規化が破綻するため raise。"""
     depth = np.array([[1.0]], dtype=np.float32)
@@ -48,6 +71,49 @@ def test_to_colormap_vmax_le_vmin_raises():
         to_colormap(depth, vmin=100.0, vmax=100.0)
     with pytest.raises(ValueError):
         to_colormap(depth, vmin=100.0, vmax=50.0)
+
+
+# ===== valid-hold・ライブ表示の合成 =====
+
+def test_hold_valid_fills_nan_from_newest_history_first():
+    cur = np.array([[np.nan, 1.0, np.nan, np.nan]], dtype=np.float32)
+    newer = np.array([[2.0, 9.0, np.nan, np.nan]], dtype=np.float32)
+    older = np.array([[7.0, 8.0, 3.0, np.nan]], dtype=np.float32)
+    cur_copy, newer_copy, older_copy = cur.copy(), newer.copy(), older.copy()
+
+    out = hold_valid(cur, [newer, older])
+
+    # 現在の有効値は変えず、無効の画素だけを新しい履歴から順に埋める
+    np.testing.assert_array_equal(out, np.array([[2.0, 1.0, 3.0, np.nan]], dtype=np.float32))
+    for arr, orig in ((cur, cur_copy), (newer, newer_copy), (older, older_copy)):
+        np.testing.assert_array_equal(arr, orig)        # 入力は書き換えない
+
+
+def test_hold_valid_without_history_returns_equal_copy():
+    cur = np.array([[np.nan, 1.0]], dtype=np.float32)
+    out = hold_valid(cur, [])
+    np.testing.assert_array_equal(out, cur)
+    assert out is not cur
+
+
+def test_compose_live_view_puts_input_left_and_depth_right():
+    proc = np.full((352, 528, 3), 40, dtype=np.uint8)
+    panel = np.full((352, 528, 3), 200, dtype=np.uint8)
+    view = compose_live_view(proc, panel, hold_on=True, show_overlay=False)
+    assert view.shape == (352, 1056, 3) and view.dtype == np.uint8
+    assert tuple(int(c) for c in view[176, 100]) == (40, 40, 40)          # 左: 入力画像
+    assert tuple(int(c) for c in view[176, 528 + 100]) == (200, 200, 200)  # 右: 距離マップ
+    # 入力は書き換えない
+    assert int(proc.max()) == 40 and int(panel.min()) == 200
+
+
+def test_compose_live_view_overlay_toggles_hint_text():
+    proc = np.zeros((352, 528, 3), dtype=np.uint8)
+    panel = np.zeros((352, 528, 3), dtype=np.uint8)
+    on = compose_live_view(proc, panel, hold_on=True, show_overlay=True)
+    off = compose_live_view(proc, panel, hold_on=True, show_overlay=False)
+    assert on[:40, :528].any()            # 操作ヒントが入力画像の上部に描かれる
+    assert not off[:40, :528].any()       # 非表示なら描かれない
 
 
 # ===== draw_colorbar =====
@@ -439,6 +505,7 @@ def _run_one_frame(tmp_path, monkeypatch, fail_when=None):
     """GUI だけ無害化して run を 1 フレーム回す。fail_when(path) が真の書込みだけ imwrite が False を返す。"""
     monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
     monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+    monkeypatch.setattr(cv2, "namedWindow", lambda *a, **k: None)
     monkeypatch.setattr(cv2, "imshow", lambda *a, **k: None)
     monkeypatch.setattr(cv2, "waitKey", lambda *a, **k: -1)
     monkeypatch.setattr(cv2, "destroyAllWindows", lambda *a, **k: None)

@@ -40,7 +40,7 @@ DISP_MAX = (SEARCH_RANGE_X - 1) // 2   # = 20。search 半幅と一致。ZNCC �
 INFER_BAND_LOW  = 0.45
 INFER_BAND_HIGH = 5.0
 DEPTH_MIN = 0
-DEPTH_MAX = 50000  # 現行の Z 範囲。一時変更する場合は必ず戻すこと
+DEPTH_MAX = 5000  # 距離 Z の範囲 [mm]。ライブ表示の色の割り当てと、checks/ の距離範囲ゲート（0 < z < DEPTH_MAX）の両方に使う
 EPS_DEN = 1.0           # compute_depth へ注入（分母ゼロガード）
 
 # ===== キャリブレーション: 視差プロットのゲート (calibration/calibrate.py) =====
