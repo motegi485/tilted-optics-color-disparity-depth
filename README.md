@@ -116,7 +116,9 @@ uv run python -m tools.play_session_videos --session demo_01
 
 ## ライセンス・引用
 
-[BSD-3-Clause](LICENSE)（無保証。MIT のコードを元にした部分は [NOTICE](NOTICE)）。利用する場合は [CITATION.cff](CITATION.cff) と、手法の元になった研究（下の参考論文、特に Fukino ら）の引用をお願いしたい（お願いで、利用条件ではない）。
+- ライセンス: [BSD-3-Clause](LICENSE)（無保証）
+- 元コードの表示: [NOTICE](NOTICE)（MIT ライセンスのコードを元にした部分）
+- 引用情報: [CITATION.cff](CITATION.cff)
 
 ## 参考資料
 
